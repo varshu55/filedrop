@@ -102,7 +102,7 @@ async function main() {
   let isTransferring = false;
   let timeoutHandle;
 
-  const { server: httpAppServer, shutdown: httpAppShutdown, keyHex } = await server.createServer({
+  const { shutdown: httpAppShutdown, keyHex } = await server.createServer({
     filePath: config.filePath,
     port: port,
     options: {

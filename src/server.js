@@ -106,7 +106,7 @@ async function createServer({
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = "${escapeHtml(fileName)}";
+        a.download = decodeURIComponent("${encodeURIComponent(fileName)}");
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -170,6 +170,17 @@ async function createServer({
       return;
     }
 
+    if (method === 'HEAD') {
+      res.setHeader('Content-Type', 'application/octet-stream');
+      res.setHeader('Content-Disposition', contentDisposition);
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('Connection', 'close');
+      res.setHeader('X-Filedrop-Version', version);
+      res.setHeader('X-Transfer-ID', transferId);
+      res.end();
+      return;
+    }
+
     // It's the /download endpoint, encrypt and stream
     if (typeof onTransferStart === 'function' && !hasTransferred) {
       onTransferStart();
@@ -182,11 +193,6 @@ async function createServer({
     res.setHeader('Connection', 'close');
     res.setHeader('X-Filedrop-Version', version);
     res.setHeader('X-Transfer-ID', transferId);
-
-    if (method === 'HEAD') {
-      res.end();
-      return;
-    }
 
     let responseFinished = false;
     let transferConcluded = false;
