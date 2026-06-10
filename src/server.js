@@ -248,11 +248,42 @@ async function createServer({
           container.innerHTML = '<h1>Clipboard Received</h1><textarea readonly style="width:100%; height:150px; margin-top:20px; font-family:monospace; padding:10px; border-radius:8px; border:none; background:rgba(255,255,255,0.1); color:white; resize:none;">' + text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") + '</textarea><button id="copyBtn" style="margin-top:20px; padding:12px 24px; border-radius:8px; border:none; background:#0A84FF; color:white; font-weight:bold; font-size:16px; cursor:pointer;">Copy to Clipboard</button>';
           
           document.getElementById('copyBtn').addEventListener('click', () => {
-            navigator.clipboard.writeText(text).then(() => {
-              const btn = document.getElementById('copyBtn');
+            const btn = document.getElementById('copyBtn');
+            const doCopy = () => {
               btn.innerText = 'Copied!';
               btn.style.background = '#30D158';
-            });
+            };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(text).then(doCopy).catch(err => {
+                console.error('navigator.clipboard failed, trying fallback:', err);
+                fallbackCopy();
+              });
+            } else {
+              fallbackCopy();
+            }
+            function fallbackCopy() {
+              const textArea = document.createElement('textarea');
+              textArea.value = text;
+              textArea.style.position = 'fixed';
+              textArea.style.opacity = '0';
+              document.body.appendChild(textArea);
+              textArea.focus();
+              textArea.select();
+              try {
+                const successful = document.execCommand('copy');
+                if (successful) {
+                  doCopy();
+                } else {
+                  btn.innerText = 'Copy Failed';
+                  btn.style.background = '#FF453A';
+                }
+              } catch (err) {
+                console.error('Fallback copy failed:', err);
+                btn.innerText = 'Copy Failed';
+                btn.style.background = '#FF453A';
+              }
+              document.body.removeChild(textArea);
+            }
           });
         } else {
           document.body.appendChild(a);
