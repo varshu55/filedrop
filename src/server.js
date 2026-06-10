@@ -282,7 +282,12 @@ async function createServer({
         res.end('This file has already been transferred.');
         return;
       }
-      if (completedIPs.size + activeIPs.size >= downloadLimit && !activeIPs.has(clientIp)) {
+      if (activeIPs.has(clientIp)) {
+        res.writeHead(429, { 'Content-Type': 'text/plain', 'Retry-After': '5' });
+        res.end('You are already downloading this file.');
+        return;
+      }
+      if (completedIPs.size + activeIPs.size >= downloadLimit) {
         res.writeHead(429, { 'Content-Type': 'text/plain', 'Retry-After': '10' });
         res.end('Too Many Requests');
         return;
@@ -311,7 +316,14 @@ async function createServer({
       return;
     }
 
-    if (completedIPs.size + activeIPs.size >= downloadLimit && !activeIPs.has(clientIp)) {
+    if (activeIPs.has(clientIp)) {
+      res.writeHead(429, { 'Content-Type': 'text/plain', 'Retry-After': '5' });
+      res.end('You are already downloading this file.', () => {
+        req.socket.destroy();
+      });
+      return;
+    }
+    if (completedIPs.size + activeIPs.size >= downloadLimit) {
       res.writeHead(429, { 'Content-Type': 'text/plain', 'Retry-After': '10' });
       res.end('Too Many Requests', () => {
         req.socket.destroy();
