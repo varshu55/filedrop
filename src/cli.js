@@ -9,13 +9,13 @@ function printHelp() {
   console.log(`filedrop — instant local file & folder transfer via QR code
 
 Usage:
-  filedrop <file> [options]
+  filedrop <file-or-dir> [file2 ...] [options]
 
 Examples:
   filedrop ./photo.jpg
   filedrop ./report.pdf --port 9000 --verbose
-  filedrop ./video.mp4 --no-qr
-  filedrop ./my-folder          # serve a directory as .zip
+  filedrop ./photo1.jpg ./photo2.jpg ./photo3.jpg  # serve multiple files as .zip
+  filedrop ./my-folder                             # serve a directory as .zip
 
 Options:
   -p, --port <n>         Specific port to bind (default: auto 8000-8999)
