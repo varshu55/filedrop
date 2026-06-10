@@ -399,7 +399,7 @@ async function createServer({
     try {
       if (isDirectory) {
         const archive = new archiver.ZipArchive({ zlib: { level: 5 } });
-        archive.directory(filePath, false);
+        archive.directory(filePath, path.basename(filePath));
         archive.finalize();
         sourceStream = archive;
       } else {
