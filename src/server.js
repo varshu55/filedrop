@@ -351,7 +351,7 @@ async function createServer({
 
     // It's the /download endpoint, encrypt and stream
     if (typeof onTransferStart === 'function' && !activeIPs.has(clientIp)) {
-      onTransferStart();
+      onTransferStart(activeIPs.size + completedIPs.size + 1, downloadLimit);
     }
     activeIPs.add(clientIp);
 

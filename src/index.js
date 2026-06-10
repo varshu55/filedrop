@@ -121,10 +121,14 @@ async function main() {
       timeout: config.timeout,
       verbose: config.verbose
     },
-    onTransferStart: () => {
+    onTransferStart: (currentCount, limit) => {
       isTransferring = true;
       clearTimeout(timeoutHandle); // reset/cancel connection timeout
-      qr.updateStatus('transferring', { color: config.color });
+      if (limit > 1) {
+        qr.updateStatus(`transferring (${currentCount}/${limit})`, { color: config.color });
+      } else {
+        qr.updateStatus('transferring', { color: config.color });
+      }
     },
     onTransferComplete: (completedCount, downloadLimit) => {
       qr.updateStatus(`Downloads: ${completedCount} / ${downloadLimit}`, { color: config.color });
