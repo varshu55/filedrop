@@ -35,7 +35,7 @@ filedrop v${VERSION} — https://github.com/<org>/filedrop`);
 
 function parseArgs(argv) {
   const args = minimist(argv.slice(2), {
-    boolean: ['qr-compact', 'verbose', 'version', 'help', 'qr', 'mdns'],
+    boolean: ['qr-compact', 'verbose', 'version', 'help', 'qr', 'mdns', 'clipboard'],
     string: ['port', 'bind', 'timeout', 'name', 'color'],
     alias: {
       p: 'port',
@@ -63,34 +63,41 @@ function parseArgs(argv) {
     process.exit(0);
   }
 
-  if (args._.length !== 1) {
-    console.error('filedrop: error: exactly one file must be provided');
-    console.error("Run 'filedrop --help' for usage.");
-    process.exit(1);
-  }
+  let filePath = null;
+  let isDirectory = false;
+  let fileSize = null;
 
-  const filePath = path.resolve(args._[0]);
+  if (!args.clipboard) {
+    if (args._.length !== 1) {
+      console.error('filedrop: error: exactly one file must be provided (or use --clipboard)');
+      console.error("Run 'filedrop --help' for usage.");
+      process.exit(1);
+    }
 
-  if (!fs.existsSync(filePath)) {
-    console.error(`filedrop: error: File not found at path: ${filePath}`);
-    console.error("Run 'filedrop --help' for usage.");
-    process.exit(4);
-  }
+    filePath = path.resolve(args._[0]);
 
-  const stat = fs.statSync(filePath);
-  const isDirectory = stat.isDirectory();
-  if (!stat.isFile() && !isDirectory) {
-    console.error(`filedrop: error: Path is not a file or directory: ${filePath}`);
-    console.error("Run 'filedrop --help' for usage.");
-    process.exit(4);
-  }
+    if (!fs.existsSync(filePath)) {
+      console.error(`filedrop: error: File not found at path: ${filePath}`);
+      console.error("Run 'filedrop --help' for usage.");
+      process.exit(4);
+    }
 
-  try {
-    fs.accessSync(filePath, fs.constants.R_OK);
-  } catch (err) {
-    console.error(`filedrop: error: Permission denied reading file: ${filePath}`);
-    console.error("Run 'filedrop --help' for usage.");
-    process.exit(4);
+    const stat = fs.statSync(filePath);
+    isDirectory = stat.isDirectory();
+    fileSize = stat.size;
+    if (!stat.isFile() && !isDirectory) {
+      console.error(`filedrop: error: Path is not a file or directory: ${filePath}`);
+      console.error("Run 'filedrop --help' for usage.");
+      process.exit(4);
+    }
+
+    try {
+      fs.accessSync(filePath, fs.constants.R_OK);
+    } catch (err) {
+      console.error(`filedrop: error: Permission denied reading file: ${filePath}`);
+      console.error("Run 'filedrop --help' for usage.");
+      process.exit(4);
+    }
   }
 
   let port = null;
@@ -127,8 +134,9 @@ function parseArgs(argv) {
 
   return {
     filePath,
-    fileSize: isDirectory ? null : stat.size,
+    fileSize: isDirectory ? null : fileSize,
     isDirectory,
+    isClipboard: args.clipboard,
     port,
     bind: args.bind,
     timeout,

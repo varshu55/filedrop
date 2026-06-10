@@ -3,6 +3,7 @@
 const { parseArgs } = require('./cli');
 const path = require('path');
 const crypto = require('crypto');
+const clipboardy = require('clipboardy');
 
 // Assumed imports from other agents
 const network = require('./network');
@@ -69,9 +70,26 @@ async function main() {
   // url and filename will be constructed after server creation
   // so we can get the encryption key and attach it to the URL.
 
-  const filename = config.isDirectory 
-    ? path.basename(config.filePath) + '.zip'
-    : path.basename(config.filePath);
+  let clipboardData = null;
+  let filename;
+
+  if (config.isClipboard) {
+    try {
+      clipboardData = clipboardy.readSync();
+      if (!clipboardData) {
+        console.error('filedrop: error: Clipboard is empty');
+        process.exit(1);
+      }
+      filename = 'clipboard.txt';
+    } catch (err) {
+      console.error(`filedrop: error: Failed to read clipboard: ${err.message}`);
+      process.exit(1);
+    }
+  } else {
+    filename = config.isDirectory 
+      ? path.basename(config.filePath) + '.zip'
+      : path.basename(config.filePath);
+  }
 
   // 5. Initialize mDNS module (non-blocking)
   let mdnsName = config.name || filename.replace(/[^a-zA-Z0-9]/g, '').toLowerCase().substring(0, 15) + '-filedrop';
@@ -106,6 +124,8 @@ async function main() {
 
   const { shutdown: httpAppShutdown, keyHex } = await server.createServer({
     filePath: config.filePath,
+    clipboardData,
+    isClipboard: config.isClipboard,
     port: port,
     isDirectory: config.isDirectory,
     options: {
@@ -134,7 +154,12 @@ async function main() {
     const qrString = qr.renderQR(url, { compact: config.qrCompact, noQr: false, color: config.color });
     console.log(qrString);
     if (!config.qrCompact) {
-      const sizeDisplay = config.isDirectory ? '(streaming zip)' : config.fileSize + ' bytes';
+      let sizeDisplay;
+      if (config.isClipboard) {
+        sizeDisplay = 'Clipboard Text';
+      } else {
+        sizeDisplay = config.isDirectory ? '(streaming zip)' : config.fileSize + ' bytes';
+      }
       console.log(qr.renderMetadataBox(filename, sizeDisplay, url, config.mdns ? mdnsName : null, { color: config.color }));
     }
   } else {
