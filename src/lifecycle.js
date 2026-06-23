@@ -222,7 +222,7 @@ class LifecycleManager extends EventEmitter {
           setTimeout(done, 500);
         });
       } catch (e) {
-         console.error('Failed to flush stdout:', err);
+         console.error('Failed to flush stdout:', e);
       }
     }
 
