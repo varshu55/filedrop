@@ -167,14 +167,24 @@ class LifecycleManager extends EventEmitter {
     if (this.mdns && typeof this.mdns.deregister === 'function') {
       try {
         await this._withTimeout(this.mdns.deregister(), 2000);
-      } catch (err) {}
+      } catch (err) {
+         this.emit('shutdown-error', {
+      phase: 'mdns.deregister',
+      error: err
+    });
+      }
     }
 
     // 4. Call server.shutdown() — await with 3s timeout
     if (this.server && typeof this.server.shutdown === 'function') {
       try {
         await this._withTimeout(this.server.shutdown(), 3000);
-      } catch (err) {}
+      } catch (err) {
+         this.emit('shutdown-error', {
+      phase: 'server.shutdown',
+      error: err
+    });
+      }
     }
 
     // Close any tracked file streams
@@ -211,7 +221,9 @@ class LifecycleManager extends EventEmitter {
 
           setTimeout(done, 500);
         });
-      } catch (e) {}
+      } catch (e) {
+         console.error('Failed to flush stdout:', err);
+      }
     }
 
     // 6. Call process.exit(exitCode)
