@@ -3,7 +3,6 @@
  */
 const test = require('node:test');
 const assert = require('node:assert');
-const path = require('path');
 const { createServer } = require('./server.js');
 const { createTempFile, cleanupTempFiles } = require('../test/helpers/create-temp-file.js');
 const { httpClient } = require('../test/helpers/http-client.js');
@@ -108,6 +107,32 @@ test('Server Core', async (t) => {
     const res = await httpClient(`http://127.0.0.1:${port}/`, { method: 'POST' });
 
     assert.strictEqual(res.statusCode, 405);
+    await shutdown();
+  });
+
+  await t.test('Custom rate limit options control request threshold and retry header', async () => {
+    const filePath = createTempFile(1024, '.txt');
+    const { server, shutdown } = await createServer({
+      filePath,
+      port: 0,
+      options: {
+        rateLimitWindow: 2000,
+        rateLimitMax: 1
+      },
+      onTransferComplete: () => {},
+      onTransferError: () => {}
+    });
+
+    const port = server.address().port;
+    const url = `http://127.0.0.1:${port}/unknown-path`;
+
+    const res1 = await httpClient(url);
+    assert.strictEqual(res1.statusCode, 404);
+
+    const res2 = await httpClient(url);
+    assert.strictEqual(res2.statusCode, 429);
+    assert.strictEqual(res2.headers['retry-after'], '2');
+
     await shutdown();
   });
 

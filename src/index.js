@@ -143,7 +143,9 @@ async function main() {
     downloadLimit: limit,
     options: {
       timeout: config.timeout,
-      verbose: config.verbose
+      verbose: config.verbose,
+      rateLimitWindow: config.rateLimitWindow,
+      rateLimitMax: config.rateLimitMax
     },
     onTransferStart: (currentCount, limit) => {
       isTransferring = true;
