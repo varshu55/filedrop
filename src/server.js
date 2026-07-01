@@ -70,9 +70,10 @@ async function createServer({
   const activeIPs = new Set();
   const sockets = new Set();
 
-  // Rate limiting: max 30 requests per 10 seconds per IP
-  const rateLimitWindow = 10000; // 10 seconds
-  const rateLimitMax = 30;
+  // Rate limiting: max 30 requests per 10 seconds per IP by default
+  const rateLimitWindow = options.rateLimitWindow ?? 10000;
+  const rateLimitMax = options.rateLimitMax ?? 30;
+  const rateLimitRetryAfter = Math.ceil(rateLimitWindow / 1000);
   const ipRequestCounts = new Map();
 
   function checkRateLimit(ip) {
@@ -336,7 +337,7 @@ async function createServer({
 
     const clientIp = req.socket.remoteAddress;
     if (!checkRateLimit(clientIp)) {
-      res.writeHead(429, { 'Content-Type': 'text/plain', 'Retry-After': '10' });
+      res.writeHead(429, { 'Content-Type': 'text/plain', 'Retry-After': String(rateLimitRetryAfter) });
       res.end('Too Many Requests');
       return;
     }

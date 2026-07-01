@@ -21,6 +21,9 @@ Options:
   -p, --port <n>         Specific port to bind (default: auto 8000-8999)
   -b, --bind <ip>        Network interface IP to use (default: auto-detect)
   -t, --timeout <s>      Seconds to wait for a connection (default: 300)
+  --rate-limit-window <ms>
+                         Rate limit window in milliseconds (default: 10000)
+  --rate-limit-max <n>   Max requests per IP per window (default: 30)
   -n, --name <name>      Override mDNS service name
   --no-qr                Suppress QR code, print URL only
   --qr-compact           Print QR code without surrounding metadata box
@@ -37,7 +40,7 @@ filedrop v${VERSION} — https://github.com/<org>/filedrop`);
 function parseArgs(argv) {
   const args = minimist(argv.slice(2), {
     boolean: ['qr-compact', 'verbose', 'version', 'help', 'qr', 'mdns', 'clipboard'],
-    string: ['port', 'bind', 'timeout', 'name', 'color'],
+    string: ['port', 'bind', 'timeout', 'rate-limit-window', 'rate-limit-max', 'name', 'color'],
     alias: {
       p: 'port',
       b: 'bind',
@@ -50,7 +53,9 @@ function parseArgs(argv) {
       qr: true,
       mdns: true,
       color: true,
-      timeout: '300'
+      timeout: '300',
+      'rate-limit-window': '10000',
+      'rate-limit-max': '30'
     }
   });
 
@@ -146,6 +151,20 @@ function parseArgs(argv) {
     process.exit(1);
   }
 
+  const rateLimitWindow = parseInt(args['rate-limit-window'], 10);
+  if (isNaN(rateLimitWindow) || rateLimitWindow <= 0) {
+    console.error('filedrop: error: --rate-limit-window must be a positive integer');
+    console.error("Run 'filedrop --help' for usage.");
+    process.exit(1);
+  }
+
+  const rateLimitMax = parseInt(args['rate-limit-max'], 10);
+  if (isNaN(rateLimitMax) || rateLimitMax <= 0) {
+    console.error('filedrop: error: --rate-limit-max must be a positive integer');
+    console.error("Run 'filedrop --help' for usage.");
+    process.exit(1);
+  }
+
   return {
     filePath,
     filePaths,
@@ -156,6 +175,8 @@ function parseArgs(argv) {
     port,
     bind: args.bind,
     timeout,
+    rateLimitWindow,
+    rateLimitMax,
     name: args.name,
     qr: args.qr,
     qrCompact: args['qr-compact'],
