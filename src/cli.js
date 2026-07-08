@@ -1,8 +1,8 @@
-const minimist = require('minimist');
-const fs = require('fs');
-const path = require('path');
+const minimist = require("minimist");
+const fs = require("fs");
+const path = require("path");
 
-const pkg = require('../package.json');
+const pkg = require("../package.json");
 const VERSION = pkg.version;
 
 function printHelp() {
@@ -39,24 +39,40 @@ filedrop v${VERSION} — https://github.com/<org>/filedrop`);
 
 function parseArgs(argv) {
   const args = minimist(argv.slice(2), {
-    boolean: ['qr-compact', 'verbose', 'version', 'help', 'qr', 'mdns', 'clipboard'],
-    string: ['port', 'bind', 'timeout', 'rate-limit-window', 'rate-limit-max', 'name', 'color'],
+    boolean: [
+      "qr-compact",
+      "verbose",
+      "version",
+      "help",
+      "qr",
+      "mdns",
+      "clipboard",
+    ],
+    string: [
+      "port",
+      "bind",
+      "timeout",
+      "rate-limit-window",
+      "rate-limit-max",
+      "name",
+      "color",
+    ],
     alias: {
-      p: 'port',
-      b: 'bind',
-      t: 'timeout',
-      n: 'name',
-      v: 'verbose',
-      h: 'help'
+      p: "port",
+      b: "bind",
+      t: "timeout",
+      n: "name",
+      v: "verbose",
+      h: "help",
     },
     default: {
       qr: true,
       mdns: true,
       color: true,
-      timeout: '300',
-      'rate-limit-window': '10000',
-      'rate-limit-max': '30'
-    }
+      timeout: "300",
+      "rate-limit-window": "10000",
+      "rate-limit-max": "30",
+    },
   });
 
   if (args.help) {
@@ -77,18 +93,24 @@ function parseArgs(argv) {
 
   if (args.clipboard) {
     if (args._.length !== 0) {
-      console.error('filedrop: error: Cannot provide a file path when sharing clipboard');
+      console.error(
+        "filedrop: error: Cannot provide a file path when sharing clipboard",
+      );
       console.error("Run 'filedrop --help' for usage.");
       process.exit(1);
     }
   } else {
     if (args._.length === 0) {
-      console.error('filedrop: error: at least one file or directory must be provided (or use --clipboard)');
+      console.error(
+        "filedrop: error: at least one file or directory must be provided (or use --clipboard)",
+      );
       console.error("Run 'filedrop --help' for usage.");
       process.exit(1);
     }
 
-    filePaths = args._.map(p => path.resolve(p));
+    filePaths = args._.map((p) => path.resolve(p));
+
+    const statCache = new Map();
 
     for (const p of filePaths) {
       if (!fs.existsSync(p)) {
@@ -98,6 +120,7 @@ function parseArgs(argv) {
       }
 
       const stat = fs.statSync(p);
+      statCache.set(p, stat);
       if (!stat.isFile() && !stat.isDirectory()) {
         console.error(`filedrop: error: Path is not a file or directory: ${p}`);
         console.error("Run 'filedrop --help' for usage.");
@@ -115,15 +138,18 @@ function parseArgs(argv) {
 
     filePath = filePaths[0];
     isMultiFile = filePaths.length > 1;
-    isDirectory = isMultiFile || fs.statSync(filePath).isDirectory();
-    fileSize = isDirectory ? null : fs.statSync(filePath).size;
+    const firstStat = statCache.get(filePath);
+    isDirectory = isMultiFile || firstStat.isDirectory();
+    fileSize = isDirectory ? null : firstStat.size;
   }
 
   let port = null;
   if (args.port !== undefined) {
     port = parseInt(args.port, 10);
     if (isNaN(port) || port < 1024 || port > 65535) {
-      console.error('filedrop: error: --port must be a valid integer between 1024 and 65535');
+      console.error(
+        "filedrop: error: --port must be a valid integer between 1024 and 65535",
+      );
       console.error("Run 'filedrop --help' for usage.");
       process.exit(1);
     }
@@ -132,13 +158,15 @@ function parseArgs(argv) {
   if (args.bind) {
     const ipv4Regex = /^(\d{1,3}\.){3}\d{1,3}$/;
     if (!ipv4Regex.test(args.bind)) {
-      console.error('filedrop: error: --bind must be a valid IPv4 address');
+      console.error("filedrop: error: --bind must be a valid IPv4 address");
       console.error("Run 'filedrop --help' for usage.");
       process.exit(1);
     }
-    const octets = args.bind.split('.');
-    if (octets.some(o => parseInt(o, 10) > 255)) {
-      console.error('filedrop: error: --bind must be a valid IPv4 address (octets <= 255)');
+    const octets = args.bind.split(".");
+    if (octets.some((o) => parseInt(o, 10) > 255)) {
+      console.error(
+        "filedrop: error: --bind must be a valid IPv4 address (octets <= 255)",
+      );
       console.error("Run 'filedrop --help' for usage.");
       process.exit(1);
     }
@@ -146,21 +174,25 @@ function parseArgs(argv) {
 
   let timeout = parseInt(args.timeout, 10);
   if (isNaN(timeout) || timeout <= 0) {
-    console.error('filedrop: error: --timeout must be a positive integer');
+    console.error("filedrop: error: --timeout must be a positive integer");
     console.error("Run 'filedrop --help' for usage.");
     process.exit(1);
   }
 
-  const rateLimitWindow = parseInt(args['rate-limit-window'], 10);
+  const rateLimitWindow = parseInt(args["rate-limit-window"], 10);
   if (isNaN(rateLimitWindow) || rateLimitWindow <= 0) {
-    console.error('filedrop: error: --rate-limit-window must be a positive integer');
+    console.error(
+      "filedrop: error: --rate-limit-window must be a positive integer",
+    );
     console.error("Run 'filedrop --help' for usage.");
     process.exit(1);
   }
 
-  const rateLimitMax = parseInt(args['rate-limit-max'], 10);
+  const rateLimitMax = parseInt(args["rate-limit-max"], 10);
   if (isNaN(rateLimitMax) || rateLimitMax <= 0) {
-    console.error('filedrop: error: --rate-limit-max must be a positive integer');
+    console.error(
+      "filedrop: error: --rate-limit-max must be a positive integer",
+    );
     console.error("Run 'filedrop --help' for usage.");
     process.exit(1);
   }
@@ -179,10 +211,10 @@ function parseArgs(argv) {
     rateLimitMax,
     name: args.name,
     qr: args.qr,
-    qrCompact: args['qr-compact'],
+    qrCompact: args["qr-compact"],
     mdns: args.mdns,
     verbose: args.verbose,
-    color: args.color
+    color: args.color,
   };
 }
 
