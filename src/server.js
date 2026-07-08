@@ -74,28 +74,35 @@ async function createServer({
   const rateLimitWindow = options.rateLimitWindow ?? 10000;
   const rateLimitMax = options.rateLimitMax ?? 30;
   const rateLimitRetryAfter = Math.ceil(rateLimitWindow / 1000);
-  const ipRequestCounts = new Map();
+  const ipRequestCounts = new Map(); // Maps IP -> Array of timestamps
 
   function checkRateLimit(ip) {
     const now = Date.now();
-    let record = ipRequestCounts.get(ip);
-    if (!record || (now - record.windowStart) > rateLimitWindow) {
-      record = { windowStart: now, count: 1 };
-      ipRequestCounts.set(ip, record);
-      return true; // allowed
-    }
-    record.count++;
-    if (record.count > rateLimitMax) {
+    let timestamps = ipRequestCounts.get(ip) || [];
+    
+    // Filter out timestamps outside the rolling window
+    timestamps = timestamps.filter(timestamp => (now - timestamp) <= rateLimitWindow);
+    
+    if (timestamps.length >= rateLimitMax) {
+      // Save the cleaned array back before blocking
+      ipRequestCounts.set(ip, timestamps);
       return false; // blocked
     }
+    
+    timestamps.push(now);
+    ipRequestCounts.set(ip, timestamps);
     return true; // allowed
   }
 
   const rateLimitCleanup = setInterval(() => {
     const now = Date.now();
-    for (const [ip, record] of ipRequestCounts) {
-      if ((now - record.windowStart) > rateLimitWindow * 2) {
+    for (const [ip, timestamps] of ipRequestCounts) {
+      // If the latest request in the array is ancient, clean up the whole IP
+      const validTimestamps = timestamps.filter(t => (now - t) <= rateLimitWindow);
+      if (validTimestamps.length === 0) {
         ipRequestCounts.delete(ip);
+      } else {
+        ipRequestCounts.set(ip, validTimestamps);
       }
     }
   }, rateLimitWindow * 2);
