@@ -29,7 +29,11 @@ class LifecycleManager extends EventEmitter {
     this.connectionTimeoutSeconds = config.timeout || 300;
     this.transferTimeoutSeconds = 60; // Hardcoded 60s limit for transfer after connection
     this.stdoutFlushTimeout = config.stdoutFlushTimeout ?? 500;
-    
+    const failsafeInput = Number(config.failsafeExitTimeout);
+    this.failsafeExitTimeout = Number.isFinite(failsafeInput) && failsafeInput > 0
+      ? failsafeInput
+      : 1000;
+
     this.connectionTimer = null;
     this.transferTimer = null;
     
@@ -46,8 +50,6 @@ class LifecycleManager extends EventEmitter {
 
   registerFileStream(stream) {
     if (this.exitStarted) {
-      // Shutdown already in progress — don't track it, just destroy it
-      // immediately so it can't leak past cleanup.
       if (stream && typeof stream.destroy === 'function') {
         stream.destroy();
       }
@@ -163,7 +165,7 @@ class LifecycleManager extends EventEmitter {
     this.exitStarted = true;
 
     // Failsafe exit in case teardown hangs
-    setTimeout(() => process.exit(exitCode), 1000).unref();
+    setTimeout(() => process.exit(exitCode), this.failsafeExitTimeout).unref();
 
     // 1. Cancel all active timers
     this._cancelConnectionTimeout();
@@ -178,10 +180,10 @@ class LifecycleManager extends EventEmitter {
       try {
         await this._withTimeout(this.mdns.deregister(), 2000);
       } catch (err) {
-         this.emit('shutdown-error', {
-      phase: 'mdns.deregister',
-      error: err
-    });
+        this.emit('shutdown-error', {
+          phase: 'mdns.deregister',
+          error: err
+        });
       }
     }
 
@@ -190,14 +192,13 @@ class LifecycleManager extends EventEmitter {
       try {
         await this._withTimeout(this.server.shutdown(), 3000);
       } catch (err) {
-         this.emit('shutdown-error', {
-      phase: 'server.shutdown',
-      error: err
-    });
+        this.emit('shutdown-error', {
+          phase: 'server.shutdown',
+          error: err
+        });
       }
     }
 
-    // Close any tracked file streams.
     // Snapshot the Set first — destroy() can trigger the 'close' handler
     // synchronously/early in some stream implementations, which deletes
     // from this.fileStreams. Iterating a live Set while it's being mutated
@@ -216,7 +217,7 @@ class LifecycleManager extends EventEmitter {
       this.emit('stateChange', { oldState, newState: STATES.EXITED });
     }
 
-    // 5. Flush stdout (use process.stdout.end only if needed, test carefully)
+    // 5. Flush stdout
     if (process.stdout && !process.stdout.destroyed) {
       try {
         await new Promise((resolve) => {
@@ -237,7 +238,7 @@ class LifecycleManager extends EventEmitter {
           setTimeout(done, this.stdoutFlushTimeout);
         });
       } catch (e) {
-         console.error('Failed to flush stdout:', e);
+        console.error('Failed to flush stdout:', e);
       }
     }
 
