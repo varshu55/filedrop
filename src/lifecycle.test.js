@@ -49,7 +49,6 @@ test('Lifecycle Manager', async (t) => {
       }
     }
   });
-
   await t.test('Streams registered after exitStarted are destroyed immediately', async () => {
     const lm = new LifecycleManager();
     lm.exitStarted = true;
