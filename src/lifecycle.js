@@ -29,7 +29,10 @@ class LifecycleManager extends EventEmitter {
     this.connectionTimeoutSeconds = config.timeout || 300;
     this.transferTimeoutSeconds = 60; // Hardcoded 60s limit for transfer after connection
     this.stdoutFlushTimeout = config.stdoutFlushTimeout ?? 500;
-    this.failsafeExitTimeoutMs = config.failsafeExitTimeout ?? 1000;
+    const failsafeInput = Number(config.failsafeExitTimeout);
+    this.failsafeExitTimeoutMs = Number.isFinite(failsafeInput) && failsafeInput > 0
+      ? failsafeInput
+      : 1000;
 
     this.connectionTimer = null;
     this.transferTimer = null;
