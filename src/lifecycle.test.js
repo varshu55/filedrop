@@ -84,12 +84,12 @@ test('Lifecycle Manager', async (t) => {
 
   await t.test('Failsafe exit uses default 1000ms when failsafeExitTimeout is not configured', async () => {
     const lm = new LifecycleManager();
-    assert.strictEqual(lm.failsafeExitTimeoutMs, 1000);
+    assert.strictEqual(lm.failsafeExitTimeout, 1000);
   });
 
   await t.test('Failsafe exit uses custom timeout when failsafeExitTimeout is configured', async () => {
     const lm = new LifecycleManager({ failsafeExitTimeout: 500 });
-    assert.strictEqual(lm.failsafeExitTimeoutMs, 500);
+    assert.strictEqual(lm.failsafeExitTimeout, 500);
   });
 
   await t.test('Failsafe fires at configured interval using fake timers', async (t) => {
@@ -100,7 +100,7 @@ test('Lifecycle Manager', async (t) => {
     const lm = new LifecycleManager({ failsafeExitTimeout: 500 });
 
     // Arm the failsafe timer directly — same pattern as exitCleanly
-    setTimeout(() => process.exit(0), lm.failsafeExitTimeoutMs).unref();
+    setTimeout(() => process.exit(0), lm.failsafeExitTimeout).unref();
 
     // Just before the threshold — should not have fired yet
     t.mock.timers.tick(499);

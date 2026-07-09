@@ -30,7 +30,7 @@ class LifecycleManager extends EventEmitter {
     this.transferTimeoutSeconds = 60; // Hardcoded 60s limit for transfer after connection
     this.stdoutFlushTimeout = config.stdoutFlushTimeout ?? 500;
     const failsafeInput = Number(config.failsafeExitTimeout);
-    this.failsafeExitTimeoutMs = Number.isFinite(failsafeInput) && failsafeInput > 0
+    this.failsafeExitTimeout = Number.isFinite(failsafeInput) && failsafeInput > 0
       ? failsafeInput
       : 1000;
 
@@ -165,7 +165,7 @@ class LifecycleManager extends EventEmitter {
     this.exitStarted = true;
 
     // Failsafe exit in case teardown hangs
-    setTimeout(() => process.exit(exitCode), this.failsafeExitTimeoutMs).unref();
+    setTimeout(() => process.exit(exitCode), this.failsafeExitTimeout).unref();
 
     // 1. Cancel all active timers
     this._cancelConnectionTimeout();
