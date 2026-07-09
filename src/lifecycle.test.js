@@ -112,5 +112,18 @@ test('Lifecycle Manager', async (t) => {
     assert.strictEqual(exitCalls[0], 0);
   });
 
+  await t.test('Failsafe exit falls back to default for invalid values', async () => {
+    const invalid = [0, -500, 'abc', null, NaN];
+    for (const value of invalid) {
+      const lm = new LifecycleManager({ failsafeExitTimeout: value });
+      assert.strictEqual(lm.failsafeExitTimeoutMs, 1000, `expected default for value: ${value}`);
+    }
+  });
+
+  await t.test('Failsafe exit coerces numeric strings', async () => {
+    const lm = new LifecycleManager({ failsafeExitTimeout: '2000' });
+    assert.strictEqual(lm.failsafeExitTimeoutMs, 2000);
+  });
+
 });
 
