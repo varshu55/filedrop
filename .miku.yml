@@ -32,3 +32,9 @@ area_labels:
     - "test/**"
     - "test.js"
     - "test2.js"
+
+# Disable star-gate for filedrop: anyone can open a PR without starring first.
+star_gate: false
+
+# Auto-assign the PR author when they open a PR.
+pr_auto_assign: true
