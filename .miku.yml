@@ -41,4 +41,4 @@ pr_auto_assign: true
 
 # ECSOC26 event support
 ecsoc26: true
-ecsoc26_label: "ECSOC26"
+ecsoc26_label: "ECSoC26"
