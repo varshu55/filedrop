@@ -197,7 +197,8 @@ async function main() {
   let isShuttingDown = false;
   const handleExit = async () => {
     if (isShuttingDown) return;
-    
+    isShuttingDown = true;
+
     if (isTransferring) {
       console.log('\nTransfer in progress — waiting for completion...');
       // Wait for the configured grace period before force-exiting
@@ -208,7 +209,6 @@ async function main() {
       return;
     }
 
-    isShuttingDown = true;
     process.stdout.write('\n'); // Terminal may be mid-line
     console.log('Interrupted. No file was transferred.');
     
