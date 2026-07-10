@@ -163,8 +163,9 @@ function parseArgs(argv) {
   }
 
   const shutdownGraceMs = Number(shutdownGraceMsRaw);
-  if (!Number.isSafeInteger(shutdownGraceMs) || shutdownGraceMs <= 0) {
-    console.error('filedrop: error: --shutdown-grace-ms must be a positive integer');
+  const MAX_TIMEOUT_MS = 2_147_483_647; // setTimeout() maximum delay (2^31 - 1)
+  if (!Number.isSafeInteger(shutdownGraceMs) || shutdownGraceMs <= 0 || shutdownGraceMs > MAX_TIMEOUT_MS) {
+    console.error(`filedrop: error: --shutdown-grace-ms must be a positive integer <= ${MAX_TIMEOUT_MS}`);
     console.error("Run 'filedrop --help' for usage.");
     process.exit(1);
   }
