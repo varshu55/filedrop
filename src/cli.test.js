@@ -24,4 +24,28 @@ test('CLI Parser', async (t) => {
     assert.strictEqual(config.rateLimitWindow, 2500);
     assert.strictEqual(config.rateLimitMax, 7);
   });
+
+  await t.test('Parses custom --shutdown-grace-ms option', () => {
+    const filePath = createTempFile(1024, '.txt');
+    const config = parseArgs([
+      'node',
+      'filedrop',
+      filePath,
+      '--shutdown-grace-ms',
+      '5000'
+    ]);
+
+    assert.strictEqual(config.shutdownGraceMs, 5000);
+  });
+
+  await t.test('--shutdown-grace-ms defaults to 10000 when not provided', () => {
+    const filePath = createTempFile(1024, '.txt');
+    const config = parseArgs([
+      'node',
+      'filedrop',
+      filePath
+    ]);
+
+    assert.strictEqual(config.shutdownGraceMs, 10000);
+  });
 });

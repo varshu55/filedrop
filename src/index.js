@@ -200,11 +200,11 @@ async function main() {
     
     if (isTransferring) {
       console.log('\nTransfer in progress — waiting for completion...');
-      // Wait up to 10 seconds before force-exiting
+      // Wait for the configured grace period before force-exiting
       setTimeout(() => {
         process.stdout.write('\nForcing exit.\n');
         process.exit(130);
-      }, 10000);
+      }, config.shutdownGraceMs);
       return;
     }
 
