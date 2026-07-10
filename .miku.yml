@@ -38,3 +38,7 @@ star_gate: false
 
 # Auto-assign the PR author when they open a PR.
 pr_auto_assign: true
+
+# ECSOC26 event support
+ecsoc26: true
+ecsoc26_label: "ECSOC26"
