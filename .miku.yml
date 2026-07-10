@@ -28,7 +28,7 @@ area_labels:
     - "Formula/**"
   kind/tests:
     - "src/*.test.js"
-    - "src/*.test-helper.js"
+    - "src/*.test.test-helper.js"
     - "test/**"
     - "test.js"
     - "test2.js"
@@ -42,3 +42,11 @@ pr_auto_assign: true
 # ECSOC26 event support
 ecsoc26: true
 ecsoc26_label: "ECSoC26"
+
+# Duplicate issue detection (TF-IDF + optional OMNI fallback)
+duplicate_detection: true
+duplicate_threshold: 0.75
+duplicate_max_candidates: 3
+duplicate_scan_depth: 30
+duplicate_use_omni: true
+duplicate_omni_threshold: 0.60
