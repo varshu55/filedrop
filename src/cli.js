@@ -21,6 +21,9 @@ Options:
   -p, --port <n>         Specific port to bind (default: auto 8000-8999)
   -b, --bind <ip>        Network interface IP to use (default: auto-detect)
   -t, --timeout <s>      Seconds to wait for a connection (default: 300)
+  --shutdown-grace-ms <ms>
+                         Milliseconds to wait for transfer completion before
+                         force-exiting on SIGINT/SIGTERM (default: 10000)
   --rate-limit-window <ms>
                          Rate limit window in milliseconds (default: 10000)
   --rate-limit-max <n>   Max requests per IP per window (default: 30)
@@ -40,7 +43,7 @@ filedrop v${VERSION} — https://github.com/<org>/filedrop`);
 function parseArgs(argv) {
   const args = minimist(argv.slice(2), {
     boolean: ['qr-compact', 'verbose', 'version', 'help', 'qr', 'mdns', 'clipboard'],
-    string: ['port', 'bind', 'timeout', 'rate-limit-window', 'rate-limit-max', 'name', 'color'],
+    string: ['port', 'bind', 'timeout', 'rate-limit-window', 'rate-limit-max', 'name', 'color', 'shutdown-grace-ms'],
     alias: {
       p: 'port',
       b: 'bind',
@@ -55,7 +58,8 @@ function parseArgs(argv) {
       color: true,
       timeout: '300',
       'rate-limit-window': '10000',
-      'rate-limit-max': '30'
+      'rate-limit-max': '30',
+      'shutdown-grace-ms': '10000'
     }
   });
 
@@ -151,6 +155,21 @@ function parseArgs(argv) {
     process.exit(1);
   }
 
+  const shutdownGraceMsRaw = args['shutdown-grace-ms'];
+  if (!/^\d+$/.test(shutdownGraceMsRaw)) {
+    console.error('filedrop: error: --shutdown-grace-ms must be a positive integer');
+    console.error("Run 'filedrop --help' for usage.");
+    process.exit(1);
+  }
+
+  const shutdownGraceMs = Number(shutdownGraceMsRaw);
+  const MAX_TIMEOUT_MS = 2_147_483_647; // setTimeout() maximum delay (2^31 - 1)
+  if (!Number.isSafeInteger(shutdownGraceMs) || shutdownGraceMs <= 0 || shutdownGraceMs > MAX_TIMEOUT_MS) {
+    console.error(`filedrop: error: --shutdown-grace-ms must be a positive integer <= ${MAX_TIMEOUT_MS}`);
+    console.error("Run 'filedrop --help' for usage.");
+    process.exit(1);
+  }
+
   const rateLimitWindow = parseInt(args['rate-limit-window'], 10);
   if (isNaN(rateLimitWindow) || rateLimitWindow <= 0) {
     console.error('filedrop: error: --rate-limit-window must be a positive integer');
@@ -175,6 +194,7 @@ function parseArgs(argv) {
     port,
     bind: args.bind,
     timeout,
+    shutdownGraceMs,
     rateLimitWindow,
     rateLimitMax,
     name: args.name,
