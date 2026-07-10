@@ -155,8 +155,15 @@ function parseArgs(argv) {
     process.exit(1);
   }
 
-  const shutdownGraceMs = parseInt(args['shutdown-grace-ms'], 10);
-  if (isNaN(shutdownGraceMs) || shutdownGraceMs <= 0) {
+  const shutdownGraceMsRaw = args['shutdown-grace-ms'];
+  if (!/^\d+$/.test(shutdownGraceMsRaw)) {
+    console.error('filedrop: error: --shutdown-grace-ms must be a positive integer');
+    console.error("Run 'filedrop --help' for usage.");
+    process.exit(1);
+  }
+
+  const shutdownGraceMs = Number(shutdownGraceMsRaw);
+  if (!Number.isSafeInteger(shutdownGraceMs) || shutdownGraceMs <= 0) {
     console.error('filedrop: error: --shutdown-grace-ms must be a positive integer');
     console.error("Run 'filedrop --help' for usage.");
     process.exit(1);
