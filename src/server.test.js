@@ -3,7 +3,9 @@
  */
 const test = require('node:test');
 const assert = require('node:assert');
+const http = require('http');
 const { createServer } = require('./server.js');
+const pkg = require('../package.json');
 const { createTempFile, cleanupTempFiles } = require('../test/helpers/create-temp-file.js');
 const { httpClient } = require('../test/helpers/http-client.js');
 
@@ -74,6 +76,66 @@ test('Server Core', async (t) => {
     assert.strictEqual(res.statusCode, 200);
     assert.strictEqual(res.headers['content-length'], String(1024 + 28));
     assert.strictEqual(res.body.length, 0);
+
+    await shutdown();
+  });
+
+  await t.test('X-Filedrop-Version header uses package version for download responses', async () => {
+    const filePath = createTempFile(1024, '.txt');
+    const { server, shutdown, downloadPath } = await createServer({
+      filePath,
+      port: 0,
+      onTransferComplete: () => {},
+      onTransferError: () => {}
+    });
+
+    const port = server.address().port;
+    const url = `http://127.0.0.1:${port}${downloadPath}`;
+
+    const headRes = await httpClient(url, { method: 'HEAD', agent: false });
+    assert.strictEqual(headRes.statusCode, 200);
+    assert.strictEqual(headRes.headers['x-filedrop-version'], pkg.version);
+
+    const getRes = await httpClient(url, { agent: false });
+    assert.strictEqual(getRes.statusCode, 200);
+    assert.strictEqual(getRes.headers['x-filedrop-version'], pkg.version);
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const secondGetRes = await httpClient(url, { agent: false });
+    assert.strictEqual(secondGetRes.statusCode, 410);
+    assert.strictEqual(secondGetRes.headers['x-filedrop-version'], pkg.version);
+
+    await shutdown();
+  });
+
+  await t.test('Immediate retry after client disconnect is rejected with 429', async () => {
+    const filePath = createTempFile(1024 * 1024, '.txt');
+    const { server, shutdown, downloadPath } = await createServer({
+      filePath,
+      port: 0,
+      options: {
+        transferCleanupDelay: 200
+      },
+      onTransferComplete: () => {},
+      onTransferError: () => {}
+    });
+
+    const port = server.address().port;
+    const url = `http://127.0.0.1:${port}${downloadPath}`;
+
+    const firstReq = http.get(url, (res) => {
+      res.on('data', () => {
+        firstReq.destroy();
+      });
+    });
+
+    firstReq.on('error', () => {});
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const retryRes = await httpClient(url, { agent: false });
+    assert.strictEqual(retryRes.statusCode, 429);
+    assert.strictEqual(retryRes.headers['retry-after'], '5');
 
     await shutdown();
   });

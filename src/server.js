@@ -3,6 +3,8 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const archiver = require('archiver');
+const pkg = require('../package.json');
+const VERSION = pkg.version;
 
 function escapeHtml(unsafe) {
     return unsafe
@@ -63,12 +65,16 @@ async function createServer({
     .replace(/\*/g, '%2A');
   const contentDisposition = `attachment; filename="${fileName.replace(/"/g, '\\"')}"; filename*=UTF-8''${encodedFileName}`;
 
-  const version = options.version || '1.0.0';
+  const version = options.version || VERSION;
   const timeoutMs = options.timeout ? options.timeout * 1000 : 60000;
   
   const completedIPs = new Set();
+  // Keep active transfer IPs locked for a short settle period so a retry that arrives
+  // immediately after a disconnect or finish still hits the 429 guard instead of racing
+  // with socket-close cleanup.
   const activeIPs = new Set();
   const sockets = new Set();
+  const transferCleanupDelayMs = options.transferCleanupDelay ?? 50;
 
   // Rate limiting: max 30 requests per 10 seconds per IP by default
   const rateLimitWindow = options.rateLimitWindow ?? 10000;
@@ -459,33 +465,51 @@ async function createServer({
     if (!isDirectory && !isClipboard && !isMultiFile) res.setHeader('Content-Length', fileStat.size + 28);
 
     let responseFinished = false;
-    let transferConcluded = false;
+    let transferState = 'pending';
+    let cleanupTimer = null;
 
     const transferTimeout = setTimeout(() => {
-      if (!transferConcluded) {
-        transferConcluded = true;
+      if (transferState === 'pending') {
+        transferState = 'timed-out';
         req.socket.destroy();
         onTransferError(new Error('ERR_TRANSFER_TIMEOUT'));
       }
     }, timeoutMs);
 
-    res.on('finish', () => {
-      responseFinished = true;
-    });
-
-    req.socket.on('close', () => {
-      if (transferConcluded) return;
-      transferConcluded = true;
+    const markTransferComplete = () => {
+      if (transferState === 'complete' || transferState === 'timed-out') return;
+      transferState = 'complete';
       clearTimeout(transferTimeout);
-      
-      if (responseFinished) {
-        activeIPs.delete(clientIp);
-        completedIPs.add(clientIp);
-        onTransferComplete(completedIPs.size, downloadLimit);
-      } else {
+      if (cleanupTimer) clearTimeout(cleanupTimer);
+      activeIPs.delete(clientIp);
+      completedIPs.add(clientIp);
+      onTransferComplete(completedIPs.size, downloadLimit);
+    };
+
+    const markTransferDisconnected = () => {
+      if (transferState === 'complete' || transferState === 'timed-out') return;
+      if (transferState === 'disconnect') return;
+      transferState = 'disconnect';
+      clearTimeout(transferTimeout);
+      cleanupTimer = setTimeout(() => {
+        if (transferState !== 'disconnect') return;
+        transferState = 'disconnected';
         activeIPs.delete(clientIp);
         if (sourceStream) sourceStream.destroy();
         onTransferError(new Error('ERR_CLIENT_DISCONNECTED'));
+      }, transferCleanupDelayMs);
+    };
+
+    res.on('finish', () => {
+      responseFinished = true;
+      markTransferComplete();
+    });
+
+    req.socket.on('close', () => {
+      if (responseFinished || res.writableEnded || res.finished) {
+        markTransferComplete();
+      } else {
+        markTransferDisconnected();
       }
     });
 
