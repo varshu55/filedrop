@@ -3,7 +3,12 @@
  */
 const test = require('node:test');
 const assert = require('node:assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const http = require('http');
 const { createServer } = require('./server.js');
+const pkg = require('../package.json');
 const { createTempFile, cleanupTempFiles } = require('../test/helpers/create-temp-file.js');
 const { httpClient } = require('../test/helpers/http-client.js');
 
@@ -30,6 +35,71 @@ test('Server Core', async (t) => {
     await shutdown();
   });
 
+  await t.test('GET / injects the detected MIME type for single-file transfers', async () => {
+    const filePath = createTempFile(1024, '.pdf');
+    const { server, shutdown, downloadPath } = await createServer({
+      filePath,
+      port: 0,
+      onTransferComplete: () => {},
+      onTransferError: () => {}
+    });
+
+    const port = server.address().port;
+    const htmlRes = await httpClient(`http://127.0.0.1:${port}/`);
+    const downloadRes = await httpClient(`http://127.0.0.1:${port}${downloadPath}`);
+
+    assert.match(htmlRes.body.toString(), /type: "application\/pdf"/);
+    assert.strictEqual(downloadRes.headers['content-type'], 'application/pdf');
+
+    await shutdown();
+  });
+
+  await t.test('GET downloadPath uses application/zip for directory downloads', async () => {
+    const dirPath = fs.mkdtempSync(path.join(os.tmpdir(), 'filedrop-dir-'));
+    try {
+      const nestedFilePath = path.join(dirPath, 'nested.txt');
+      fs.writeFileSync(nestedFilePath, 'hello world');
+
+      const { server, shutdown, downloadPath } = await createServer({
+        filePath: dirPath,
+        isDirectory: true,
+        port: 0,
+        onTransferComplete: () => {},
+        onTransferError: () => {}
+      });
+
+      const port = server.address().port;
+      const htmlRes = await httpClient(`http://127.0.0.1:${port}/`);
+      const downloadRes = await httpClient(`http://127.0.0.1:${port}${downloadPath}`);
+
+      assert.match(htmlRes.body.toString(), /type: "application\/zip"/);
+      assert.strictEqual(downloadRes.headers['content-type'], 'application/zip');
+
+      await shutdown();
+    } finally {
+      fs.rmSync(dirPath, { recursive: true, force: true });
+    }
+  });
+
+  await t.test('GET / injects text/plain for clipboard transfers', async () => {
+    const { server, shutdown, downloadPath } = await createServer({
+      clipboardData: 'clipboard content',
+      isClipboard: true,
+      port: 0,
+      onTransferComplete: () => {},
+      onTransferError: () => {}
+    });
+
+    const port = server.address().port;
+    const htmlRes = await httpClient(`http://127.0.0.1:${port}/`);
+    const downloadRes = await httpClient(`http://127.0.0.1:${port}${downloadPath}`);
+
+    assert.match(htmlRes.body.toString(), /type: "text\/plain"/);
+    assert.strictEqual(downloadRes.headers['content-type'], 'text/plain');
+
+    await shutdown();
+  });
+
   await t.test('GET downloadPath returns encrypted file', async () => {
     const filePath = createTempFile(1024, '.txt');
     let transferCompleted = false;
@@ -46,7 +116,7 @@ test('Server Core', async (t) => {
     const res = await httpClient(url);
 
     assert.strictEqual(res.statusCode, 200);
-    assert.strictEqual(res.headers['content-type'], 'application/octet-stream');
+    assert.strictEqual(res.headers['content-type'], 'text/plain');
     assert.strictEqual(res.headers['content-length'], String(1024 + 28)); // 1024 + IV(12) + AuthTag(16)
     assert.ok(res.headers['content-disposition'].includes('attachment'));
     assert.strictEqual(res.headers['cache-control'], 'no-store');
@@ -74,6 +144,66 @@ test('Server Core', async (t) => {
     assert.strictEqual(res.statusCode, 200);
     assert.strictEqual(res.headers['content-length'], String(1024 + 28));
     assert.strictEqual(res.body.length, 0);
+
+    await shutdown();
+  });
+
+  await t.test('X-Filedrop-Version header uses package version for download responses', async () => {
+    const filePath = createTempFile(1024, '.txt');
+    const { server, shutdown, downloadPath } = await createServer({
+      filePath,
+      port: 0,
+      onTransferComplete: () => {},
+      onTransferError: () => {}
+    });
+
+    const port = server.address().port;
+    const url = `http://127.0.0.1:${port}${downloadPath}`;
+
+    const headRes = await httpClient(url, { method: 'HEAD', agent: false });
+    assert.strictEqual(headRes.statusCode, 200);
+    assert.strictEqual(headRes.headers['x-filedrop-version'], pkg.version);
+
+    const getRes = await httpClient(url, { agent: false });
+    assert.strictEqual(getRes.statusCode, 200);
+    assert.strictEqual(getRes.headers['x-filedrop-version'], pkg.version);
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const secondGetRes = await httpClient(url, { agent: false });
+    assert.strictEqual(secondGetRes.statusCode, 410);
+    assert.strictEqual(secondGetRes.headers['x-filedrop-version'], pkg.version);
+
+    await shutdown();
+  });
+
+  await t.test('Immediate retry after client disconnect is rejected with 429', async () => {
+    const filePath = createTempFile(1024 * 1024, '.txt');
+    const { server, shutdown, downloadPath } = await createServer({
+      filePath,
+      port: 0,
+      options: {
+        transferCleanupDelay: 200
+      },
+      onTransferComplete: () => {},
+      onTransferError: () => {}
+    });
+
+    const port = server.address().port;
+    const url = `http://127.0.0.1:${port}${downloadPath}`;
+
+    const firstReq = http.get(url, (res) => {
+      res.on('data', () => {
+        firstReq.destroy();
+      });
+    });
+
+    firstReq.on('error', () => {});
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const retryRes = await httpClient(url, { agent: false });
+    assert.strictEqual(retryRes.statusCode, 429);
+    assert.strictEqual(retryRes.headers['retry-after'], '5');
 
     await shutdown();
   });
