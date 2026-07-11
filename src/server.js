@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const archiver = require('archiver');
+const mime = require('mime');
 const pkg = require('../package.json');
 const VERSION = pkg.version;
 
@@ -57,8 +58,14 @@ async function createServer({
     throw err;
   }
 
-  // Use application/octet-stream to force download
-  const contentType = 'application/octet-stream';
+  let contentType = 'application/octet-stream';
+  if (isClipboard) {
+    contentType = 'text/plain';
+  } else if (isMultiFile || isDirectory) {
+    contentType = 'application/zip';
+  } else if (filePath) {
+    contentType = mime.getType(filePath) || 'application/octet-stream';
+  }
   
   const encodedFileName = encodeURIComponent(fileName)
     .replace(/['()]/g, escape)
@@ -269,7 +276,7 @@ async function createServer({
         setPercent("100%");
         setProgressWidth("100%");
 
-        const blob = new Blob([decryptedBuffer], { type: "application/octet-stream" });
+        const blob = new Blob([decryptedBuffer], { type: ${JSON.stringify(contentType)} });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -438,7 +445,7 @@ async function createServer({
     }
 
     if (method === 'HEAD') {
-      res.setHeader('Content-Type', 'application/octet-stream');
+      res.setHeader('Content-Type', contentType);
       res.setHeader('Content-Disposition', contentDisposition);
       res.setHeader('Cache-Control', 'no-store');
       res.setHeader('Connection', 'close');
@@ -455,7 +462,7 @@ async function createServer({
     }
     activeIPs.add(clientIp);
 
-    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Type', contentType);
     res.setHeader('Content-Disposition', contentDisposition);
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Connection', 'close');
