@@ -1,0 +1,16 @@
+/**
+ * src/constants.js
+ * Shared default configurations and constants for filedrop.
+ */
+
+const DEFAULT_TIMEOUT_SECONDS = 300;
+const DEFAULT_SHUTDOWN_GRACE_MS = 10000;
+const DEFAULT_RATE_LIMIT_WINDOW_MS = 10000;
+const DEFAULT_RATE_LIMIT_MAX = 30;
+
+module.exports = {
+  DEFAULT_TIMEOUT_SECONDS,
+  DEFAULT_SHUTDOWN_GRACE_MS,
+  DEFAULT_RATE_LIMIT_WINDOW_MS,
+  DEFAULT_RATE_LIMIT_MAX
+};
