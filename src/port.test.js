@@ -4,7 +4,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const net = require('net');
-const { findAvailablePort } = require('./port.js');
+const { findAvailablePort, MAX_PORT } = require('./port.js');
 
 test('Port Manager', async (t) => {
   await t.test('Auto-selection success on first try', async () => {
@@ -25,11 +25,12 @@ test('Port Manager', async (t) => {
 
   await t.test('First port in use (fallback)', async () => {
     try {
-      const server = net.createServer().listen(8000);
-      await new Promise(r => server.once('listening', r));
+      const server = net.createServer();
+      await new Promise(r => server.listen(0, '0.0.0.0', r));
+      const p = server.address().port;
       
-      const port = await findAvailablePort(8000, 8999);
-      assert.ok(port > 8000 && port <= 8999);
+      const port = await findAvailablePort(p, Math.min(p + 5, MAX_PORT));
+      assert.ok(port > p && port <= Math.min(p + 5, MAX_PORT));
       
       server.close();
     } catch (e) {

@@ -19,6 +19,7 @@ const {
   DEFAULT_RATE_LIMIT_WINDOW_MS,
   DEFAULT_RATE_LIMIT_MAX
 } = require('./constants');
+const { MIN_PORT, MAX_PORT } = require('./port');
 
 function printHelp() {
   console.log(`filedrop — instant local file & folder transfer via QR code
@@ -141,8 +142,8 @@ function parseArgs(argv) {
   let port = null;
   if (args.port !== undefined) {
     port = parseInt(args.port, 10);
-    if (isNaN(port) || port < 1024 || port > 65535) {
-      console.error('filedrop: error: --port must be a valid integer between 1024 and 65535');
+    if (isNaN(port) || port < MIN_PORT || port > MAX_PORT) {
+      console.error(`filedrop: error: --port must be a valid integer between ${MIN_PORT} and ${MAX_PORT}`);
       console.error("Run 'filedrop --help' for usage.");
       process.exit(1);
     }

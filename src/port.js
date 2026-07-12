@@ -2,6 +2,9 @@ const net = require('net');
 const os = require('os');
 const path = require('path');
 
+const MIN_PORT = 1024;
+const MAX_PORT = 65535;
+
 let firewallWarningPrinted = false;
 
 function printFirewallWarningIfNeeded() {
@@ -81,8 +84,8 @@ async function findAvailablePort(startPort = 8000, endPort = 8999) {
  * @returns {Promise<number>}
  */
 async function getSpecificPort(port) {
-  if (!Number.isInteger(port) || port < 1024 || port > 65535) {
-    console.error(`filedrop: error: Port must be an integer between 1024 and 65535.`);
+  if (!Number.isInteger(port) || port < MIN_PORT || port > MAX_PORT) {
+    console.error(`filedrop: error: Port must be an integer between ${MIN_PORT} and ${MAX_PORT}.`);
     process.exit(1);
   }
 
@@ -97,6 +100,8 @@ async function getSpecificPort(port) {
 }
 
 module.exports = {
+  MIN_PORT,
+  MAX_PORT,
   findAvailablePort,
   getSpecificPort,
   isPortAvailable,
