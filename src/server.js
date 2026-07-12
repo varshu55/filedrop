@@ -13,6 +13,11 @@ const {
   DEFAULT_RATE_LIMIT_MAX
 } = require('./constants');
 
+// Chunk size for converting Uint8Array to binary string.
+// A chunking strategy is necessary because String.fromCharCode.apply can throw a
+// "Maximum call stack size exceeded" error if the array is too large.
+const U8_TO_BINARY_CHUNK_SIZE = 10000;
+
 function escapeHtml(unsafe) {
     return unsafe
          .replace(/&/g, "&amp;")
@@ -160,9 +165,10 @@ async function createServer({
   </div>
   <script src="/forge.min.js"></script>
   <script>
+    // Chunking is necessary to avoid "Maximum call stack size exceeded" errors from String.fromCharCode.apply
     function u8ToBinaryString(u8) {
       let res = '';
-      const chunk = 10000;
+      const chunk = ${U8_TO_BINARY_CHUNK_SIZE};
       for (let i = 0; i < u8.length; i += chunk) {
         res += String.fromCharCode.apply(null, u8.subarray(i, i + chunk));
       }
