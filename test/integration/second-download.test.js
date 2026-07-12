@@ -27,7 +27,7 @@ test('Second download integration', async (t) => {
     // Satisfy the pre-existing device limit prompt
     filedropProcess.stdin.write('\n');
     
-    await new Promise(r => setTimeout(r, 1000));
+    await new Promise(r => setTimeout(r, 2000));
 
     // Wait until the server is shut down to attempt second GET, or attempt while first is in flight.
     // The prompt says "attempt a second HTTP GET immediately after".

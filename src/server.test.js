@@ -426,4 +426,28 @@ test('Server Core', async (t) => {
     socket2.destroy();
     await shutdown();
   });
+
+  await t.test('Decoded filename route matching: correctly resolves paths with spaces/special characters', async () => {
+    const tempDir = os.tmpdir();
+    const filePath = path.join(tempDir, 'file name with space.txt');
+    fs.writeFileSync(filePath, 'content');
+
+    const { server, shutdown } = await createServer({
+      filePath,
+      port: 0,
+      onTransferComplete: () => {},
+      onTransferError: () => {}
+    });
+
+    try {
+      const port = server.address().port;
+      const res = await httpClient(`http://127.0.0.1:${port}/file%20name%20with%20space.txt`);
+      assert.strictEqual(res.statusCode, 200);
+    } finally {
+      await shutdown();
+      try {
+        fs.unlinkSync(filePath);
+      } catch (_) {}
+    }
+  });
 });

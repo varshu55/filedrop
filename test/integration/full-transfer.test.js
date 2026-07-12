@@ -33,7 +33,7 @@ test('Full transfer integration', async (t) => {
     filedropProcess.stderr.on('data', data => output += data.toString());
 
     // wait for server to start
-    await new Promise(r => setTimeout(r, 1000));
+    await new Promise(r => setTimeout(r, 2000));
 
     const res = await httpClient('http://127.0.0.1:8123/');
     assert.strictEqual(res.statusCode, 200);

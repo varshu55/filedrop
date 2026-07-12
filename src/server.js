@@ -371,8 +371,13 @@ async function createServer({
 
   const server = http.createServer((req, res) => {
     const { method } = req;
-    const parsedUrl = new URL(req.url, 'http://localhost');
-    const pathname = parsedUrl.pathname;
+    let pathname = '/';
+    try {
+      const parsedUrl = new URL(req.url, 'http://localhost');
+      pathname = decodeURIComponent(parsedUrl.pathname);
+    } catch (err) {
+      // Fallback to raw url or root if decoding fails
+    }
 
     const clientIp = req.socket.remoteAddress;
     if (!checkRateLimit(clientIp)) {
@@ -409,7 +414,7 @@ async function createServer({
     }
 
     // Serve the HTML Decryptor Interface
-    if (pathname === '/' || pathname === `/${encodeURI(fileName)}`) {
+    if (pathname === '/' || pathname === `/${fileName}`) {
       if (completedIPs.has(clientIp)) {
         res.writeHead(410, { 'Content-Type': 'text/plain' });
         res.end('This file has already been transferred.');

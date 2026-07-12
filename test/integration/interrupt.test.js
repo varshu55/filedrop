@@ -26,7 +26,7 @@ test('Interrupt handling integration', async (t) => {
     // Satisfy the pre-existing device limit prompt
     filedropProcess.stdin.write('\n');
     
-    await new Promise(r => setTimeout(r, 500));
+    await new Promise(r => setTimeout(r, 1500));
     
     filedropProcess.kill('SIGINT');
     
