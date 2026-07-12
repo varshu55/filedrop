@@ -7,6 +7,12 @@ const mime = require('mime');
 const pkg = require('../package.json');
 const VERSION = pkg.version;
 
+const {
+  DEFAULT_TIMEOUT_SECONDS,
+  DEFAULT_RATE_LIMIT_WINDOW_MS,
+  DEFAULT_RATE_LIMIT_MAX
+} = require('./constants');
+
 function escapeHtml(unsafe) {
     return unsafe
          .replace(/&/g, "&amp;")
@@ -73,7 +79,7 @@ async function createServer({
   const contentDisposition = `attachment; filename="${fileName.replace(/"/g, '\\"')}"; filename*=UTF-8''${encodedFileName}`;
 
   const version = options.version || VERSION;
-  const timeoutMs = options.timeout ? options.timeout * 1000 : 60000;
+  const timeoutMs = (options.timeout != null ? options.timeout : DEFAULT_TIMEOUT_SECONDS) * 1000;
   
   const completedIPs = new Set();
   // Keep active transfer IPs locked for a short settle period so a retry that arrives
@@ -83,9 +89,9 @@ async function createServer({
   const sockets = new Set();
   const transferCleanupDelayMs = options.transferCleanupDelay ?? 50;
 
-  // Rate limiting: max 30 requests per 10 seconds per IP by default
-  const rateLimitWindow = options.rateLimitWindow ?? 10000;
-  const rateLimitMax = options.rateLimitMax ?? 30;
+  // Rate limiting: max requests per window per IP by default
+  const rateLimitWindow = options.rateLimitWindow ?? DEFAULT_RATE_LIMIT_WINDOW_MS;
+  const rateLimitMax = options.rateLimitMax ?? DEFAULT_RATE_LIMIT_MAX;
   const rateLimitRetryAfter = Math.ceil(rateLimitWindow / 1000);
   const ipRequestCounts = new Map(); // Maps IP -> Array of timestamps
 
@@ -474,19 +480,22 @@ async function createServer({
     let responseFinished = false;
     let transferState = 'pending';
     let cleanupTimer = null;
+    let transferConcluded = false;
 
-    const transferTimeout = setTimeout(() => {
+    const transferTimeout = timeoutMs > 0 ? setTimeout(() => {
       if (transferState === 'pending') {
         transferState = 'timed-out';
+        transferConcluded = true;
         req.socket.destroy();
         onTransferError(new Error('ERR_TRANSFER_TIMEOUT'));
       }
-    }, timeoutMs);
+    }, timeoutMs) : null;
 
     const markTransferComplete = () => {
       if (transferState === 'complete' || transferState === 'timed-out') return;
       transferState = 'complete';
-      clearTimeout(transferTimeout);
+      transferConcluded = true;
+      if (transferTimeout) clearTimeout(transferTimeout);
       if (cleanupTimer) clearTimeout(cleanupTimer);
       activeIPs.delete(clientIp);
       completedIPs.add(clientIp);
@@ -497,7 +506,8 @@ async function createServer({
       if (transferState === 'complete' || transferState === 'timed-out') return;
       if (transferState === 'disconnect') return;
       transferState = 'disconnect';
-      clearTimeout(transferTimeout);
+      transferConcluded = true;
+      if (transferTimeout) clearTimeout(transferTimeout);
       cleanupTimer = setTimeout(() => {
         if (transferState !== 'disconnect') return;
         transferState = 'disconnected';

@@ -12,6 +12,14 @@ const repositoryUrl =
 const REPOSITORY_URL = repositoryUrl
   .replace(/^git\+/, '')
   .replace(/\.git$/, '');
+
+const {
+  DEFAULT_TIMEOUT_SECONDS,
+  DEFAULT_SHUTDOWN_GRACE_MS,
+  DEFAULT_RATE_LIMIT_WINDOW_MS,
+  DEFAULT_RATE_LIMIT_MAX
+} = require('./constants');
+
 function printHelp() {
   console.log(`filedrop — instant local file & folder transfer via QR code
 
@@ -27,13 +35,13 @@ Examples:
 Options:
   -p, --port <n>         Specific port to bind (default: auto 8000-8999)
   -b, --bind <ip>        Network interface IP to use (default: auto-detect)
-  -t, --timeout <s>      Seconds to wait for a connection (default: 300)
+  -t, --timeout <s>      Seconds to wait for a connection (default: ${DEFAULT_TIMEOUT_SECONDS})
   --shutdown-grace-ms <ms>
                          Milliseconds to wait for transfer completion before
-                         force-exiting on SIGINT/SIGTERM (default: 10000)
+                         force-exiting on SIGINT/SIGTERM (default: ${DEFAULT_SHUTDOWN_GRACE_MS})
   --rate-limit-window <ms>
-                         Rate limit window in milliseconds (default: 10000)
-  --rate-limit-max <n>   Max requests per IP per window (default: 30)
+                         Rate limit window in milliseconds (default: ${DEFAULT_RATE_LIMIT_WINDOW_MS})
+  --rate-limit-max <n>   Max requests per IP per window (default: ${DEFAULT_RATE_LIMIT_MAX})
   -n, --name <name>      Override mDNS service name
   --no-qr                Suppress QR code, print URL only
   --qr-compact           Print QR code without surrounding metadata box
@@ -63,10 +71,10 @@ function parseArgs(argv) {
       qr: true,
       mdns: true,
       color: true,
-      timeout: '300',
-      'rate-limit-window': '10000',
-      'rate-limit-max': '30',
-      'shutdown-grace-ms': '10000'
+      timeout: String(DEFAULT_TIMEOUT_SECONDS),
+      'rate-limit-window': String(DEFAULT_RATE_LIMIT_WINDOW_MS),
+      'rate-limit-max': String(DEFAULT_RATE_LIMIT_MAX),
+      'shutdown-grace-ms': String(DEFAULT_SHUTDOWN_GRACE_MS)
     }
   });
 

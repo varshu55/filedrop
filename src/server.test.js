@@ -286,4 +286,69 @@ test('Server Core', async (t) => {
 
     await shutdown();
   });
+
+  await t.test('Transfer timeout: custom timeout triggers ERR_TRANSFER_TIMEOUT', async () => {
+    const filePath = createTempFile(2 * 1024 * 1024, '.txt');
+    let errorCalled = false;
+    let errorPromiseResolve;
+    const errorPromise = new Promise(r => errorPromiseResolve = r);
+
+    const { server, shutdown, downloadPath } = await createServer({
+      filePath,
+      port: 0,
+      options: {
+        timeout: 0.1 // 100ms
+      },
+      onTransferComplete: () => {},
+      onTransferError: (err) => {
+        if (err.message === 'ERR_TRANSFER_TIMEOUT') {
+          errorCalled = true;
+          errorPromiseResolve();
+        }
+      }
+    });
+
+    const port = server.address().port;
+    const url = `http://127.0.0.1:${port}${downloadPath}`;
+
+    const req = http.get(url, () => {
+      // Keep open, do not consume
+    });
+
+    await errorPromise;
+    assert.strictEqual(errorCalled, true);
+    req.destroy();
+    await shutdown();
+  });
+
+  await t.test('Transfer timeout: 0 disables timeout', async () => {
+    const filePath = createTempFile(2 * 1024 * 1024, '.txt');
+    let errorCalled = false;
+
+    const { server, shutdown, downloadPath } = await createServer({
+      filePath,
+      port: 0,
+      options: {
+        timeout: 0
+      },
+      onTransferComplete: () => {},
+      onTransferError: (err) => {
+        if (err.message === 'ERR_TRANSFER_TIMEOUT') {
+          errorCalled = true;
+        }
+      }
+    });
+
+    const port = server.address().port;
+    const url = `http://127.0.0.1:${port}${downloadPath}`;
+
+    const req = http.get(url, () => {
+      // Keep open, do not consume
+    });
+
+    await new Promise(resolve => setTimeout(resolve, 150));
+    assert.strictEqual(errorCalled, false);
+    req.destroy();
+    await shutdown();
+  });
 });
