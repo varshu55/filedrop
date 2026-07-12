@@ -1,6 +1,7 @@
 const minimist = require('minimist');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const pkg = require('../package.json');
 const VERSION = pkg.version;
@@ -17,7 +18,8 @@ const {
   DEFAULT_TIMEOUT_SECONDS,
   DEFAULT_SHUTDOWN_GRACE_MS,
   DEFAULT_RATE_LIMIT_WINDOW_MS,
-  DEFAULT_RATE_LIMIT_MAX
+  DEFAULT_RATE_LIMIT_MAX,
+  DEFAULT_MAX_CONNECTIONS
 } = require('./constants');
 
 function printHelp() {
@@ -36,6 +38,9 @@ Options:
   -p, --port <n>         Specific port to bind (default: auto 8000-8999)
   -b, --bind <ip>        Network interface IP to use (default: auto-detect)
   -t, --timeout <s>      Seconds to wait for a connection (default: ${DEFAULT_TIMEOUT_SECONDS})
+  --token [token]        Require a token parameter (?t=<token>) to access links. If no value is provided, a random 16-character hex token will be generated.
+  --max-connections <n>  Max concurrent TCP connections (default: ${DEFAULT_MAX_CONNECTIONS}, 0 to disable)
+  --no-warn-sensitive    Suppress warning prompt before serving sensitive files
   --shutdown-grace-ms <ms>
                          Milliseconds to wait for transfer completion before
                          force-exiting on SIGINT/SIGTERM (default: ${DEFAULT_SHUTDOWN_GRACE_MS})
@@ -57,8 +62,8 @@ filedrop v${VERSION} — ${REPOSITORY_URL}`);
 
 function parseArgs(argv) {
   const args = minimist(argv.slice(2), {
-    boolean: ['qr-compact', 'verbose', 'version', 'help', 'qr', 'mdns', 'clipboard'],
-    string: ['port', 'bind', 'timeout', 'rate-limit-window', 'rate-limit-max', 'name', 'color', 'shutdown-grace-ms'],
+    boolean: ['qr-compact', 'verbose', 'version', 'help', 'qr', 'mdns', 'clipboard', 'warn-sensitive'],
+    string: ['port', 'bind', 'timeout', 'rate-limit-window', 'rate-limit-max', 'name', 'color', 'shutdown-grace-ms', 'token', 'max-connections'],
     alias: {
       p: 'port',
       b: 'bind',
@@ -71,10 +76,12 @@ function parseArgs(argv) {
       qr: true,
       mdns: true,
       color: true,
+      'warn-sensitive': true,
       timeout: String(DEFAULT_TIMEOUT_SECONDS),
       'rate-limit-window': String(DEFAULT_RATE_LIMIT_WINDOW_MS),
       'rate-limit-max': String(DEFAULT_RATE_LIMIT_MAX),
-      'shutdown-grace-ms': String(DEFAULT_SHUTDOWN_GRACE_MS)
+      'shutdown-grace-ms': String(DEFAULT_SHUTDOWN_GRACE_MS),
+      'max-connections': String(DEFAULT_MAX_CONNECTIONS)
     }
   });
 
@@ -199,6 +206,22 @@ function parseArgs(argv) {
     process.exit(1);
   }
 
+  const maxConnections = parseInt(args['max-connections'], 10);
+  if (isNaN(maxConnections) || maxConnections < 0) {
+    console.error('filedrop: error: --max-connections must be a non-negative integer (0 to disable)');
+    console.error("Run 'filedrop --help' for usage.");
+    process.exit(1);
+  }
+
+  let token = null;
+  if (args.token !== undefined) {
+    if (args.token === '') {
+      token = crypto.randomBytes(8).toString('hex');
+    } else {
+      token = args.token;
+    }
+  }
+
   return {
     filePath,
     filePaths,
@@ -212,6 +235,9 @@ function parseArgs(argv) {
     shutdownGraceMs,
     rateLimitWindow,
     rateLimitMax,
+    maxConnections,
+    token,
+    warnSensitive: args['warn-sensitive'],
     name: args.name,
     qr: args.qr,
     qrCompact: args['qr-compact'],

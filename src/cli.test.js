@@ -48,4 +48,46 @@ test('CLI Parser', async (t) => {
 
     assert.strictEqual(config.shutdownGraceMs, 10000);
   });
+
+  await t.test('Parses custom token, connection limit, and sensitive warning options', () => {
+    const filePath = createTempFile(1024, '.txt');
+    const config = parseArgs([
+      'node',
+      'filedrop',
+      filePath,
+      '--token',
+      'mysecret',
+      '--max-connections',
+      '5',
+      '--no-warn-sensitive'
+    ]);
+
+    assert.strictEqual(config.token, 'mysecret');
+    assert.strictEqual(config.maxConnections, 5);
+    assert.strictEqual(config.warnSensitive, false);
+  });
+
+  await t.test('Generates random 16-character hex token when --token is present but empty', () => {
+    const filePath = createTempFile(1024, '.txt');
+    const config1 = parseArgs([
+      'node',
+      'filedrop',
+      filePath,
+      '--token'
+    ]);
+    assert.strictEqual(typeof config1.token, 'string');
+    assert.strictEqual(config1.token.length, 16);
+
+    const config2 = parseArgs([
+      'node',
+      'filedrop',
+      filePath,
+      '--token',
+      '--max-connections',
+      '8'
+    ]);
+    assert.strictEqual(typeof config2.token, 'string');
+    assert.strictEqual(config2.token.length, 16);
+    assert.strictEqual(config2.maxConnections, 8);
+  });
 });

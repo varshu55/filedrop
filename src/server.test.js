@@ -351,4 +351,79 @@ test('Server Core', async (t) => {
     req.destroy();
     await shutdown();
   });
+
+  await t.test('Token protection: restricts access unless correct token is provided', async () => {
+    const filePath = createTempFile(1024, '.txt');
+    const { server, shutdown, downloadPath } = await createServer({
+      filePath,
+      port: 0,
+      options: {
+        token: 'mysecret'
+      },
+      onTransferComplete: () => {},
+      onTransferError: () => {}
+    });
+
+    const port = server.address().port;
+
+    const res1 = await httpClient(`http://127.0.0.1:${port}/`);
+    assert.strictEqual(res1.statusCode, 403);
+
+    const res2 = await httpClient(`http://127.0.0.1:${port}/?t=wrong`);
+    assert.strictEqual(res2.statusCode, 403);
+
+    const res3 = await httpClient(`http://127.0.0.1:${port}/?t=mysecret`);
+    assert.strictEqual(res3.statusCode, 200);
+
+    const res4 = await httpClient(`http://127.0.0.1:${port}/forge.min.js`);
+    assert.strictEqual(res4.statusCode, 200);
+
+    const res5 = await httpClient(`http://127.0.0.1:${port}${downloadPath}`);
+    assert.strictEqual(res5.statusCode, 403);
+
+    const res6 = await httpClient(`http://127.0.0.1:${port}${downloadPath}?t=mysecret`);
+    assert.strictEqual(res6.statusCode, 200);
+
+    await shutdown();
+  });
+
+  await t.test('Connection limiting: rejects connections beyond maxConnections', async () => {
+    const filePath = createTempFile(1024, '.txt');
+    const { server, shutdown } = await createServer({
+      filePath,
+      port: 0,
+      options: {
+        maxConnections: 1
+      },
+      onTransferComplete: () => {},
+      onTransferError: () => {}
+    });
+
+    const port = server.address().port;
+
+    const socket1 = new (require('net').Socket)();
+    await new Promise(resolve => socket1.connect(port, '127.0.0.1', resolve));
+
+    const socket2 = new (require('net').Socket)();
+    await new Promise(resolve => socket2.connect(port, '127.0.0.1', resolve));
+    
+    let receivedData = '';
+    socket2.on('data', (data) => {
+      receivedData += data.toString();
+    });
+
+    socket2.write('GET / HTTP/1.1\r\nHost: localhost\r\n\r\n');
+
+    await new Promise(resolve => {
+      socket2.on('end', resolve);
+      socket2.on('error', () => resolve());
+      setTimeout(resolve, 500);
+    });
+
+    assert.ok(receivedData.includes('HTTP/1.1 429 Too Many Requests'), 'Second connection should be rejected with 429');
+
+    socket1.destroy();
+    socket2.destroy();
+    await shutdown();
+  });
 });

@@ -4,6 +4,8 @@ const { parseArgs } = require('./cli');
 const path = require('path');
 const crypto = require('crypto');
 const clipboardy = require('clipboardy').default || require('clipboardy');
+const fs = require('fs');
+const { confirmSensitiveFile } = require('./security');
 
 // Assumed imports from other agents
 const network = require('./network');
@@ -34,6 +36,45 @@ const qr = require('./qr');
 async function main() {
   // 1. Parse and validate arguments
   const config = parseArgs(process.argv);
+
+  // Check for sensitive files
+  if (config.warnSensitive && !config.isClipboard) {
+    function getFilesRecursively(dir) {
+      let results = [];
+      try {
+        const list = fs.readdirSync(dir);
+        for (const file of list) {
+          const filePath = path.join(dir, file);
+          const stat = fs.statSync(filePath);
+          if (stat && stat.isDirectory()) {
+            results = results.concat(getFilesRecursively(filePath));
+          } else {
+            results.push(filePath);
+          }
+        }
+      } catch (err) {
+        // Ignore read errors
+      }
+      return results;
+    }
+
+    let filesToCheck = [];
+    if (config.isMultiFile) {
+      filesToCheck = config.filePaths;
+    } else if (config.isDirectory) {
+      filesToCheck = [config.filePath].concat(getFilesRecursively(config.filePath));
+    } else {
+      filesToCheck = [config.filePath];
+    }
+
+    for (const filePath of filesToCheck) {
+      const confirmed = await confirmSensitiveFile(filePath);
+      if (!confirmed) {
+        console.log('Transfer aborted by user.');
+        process.exit(1);
+      }
+    }
+  }
   
   // 2. Resolve absolute file path
   // Handled inside parseArgs, which returns an absolute config.filePath
@@ -139,7 +180,9 @@ async function main() {
       timeout: config.timeout,
       verbose: config.verbose,
       rateLimitWindow: config.rateLimitWindow,
-      rateLimitMax: config.rateLimitMax
+      rateLimitMax: config.rateLimitMax,
+      token: config.token,
+      maxConnections: config.maxConnections
     },
     onTransferStart: (currentCount, limit) => {
       isTransferring = true;
@@ -168,7 +211,7 @@ async function main() {
   });
 
   // Construct the absolute exact server URL using the real key returned by createServer
-  const url = `http://${ip}:${port}/#${keyHex}`;
+  const url = `http://${ip}:${port}/${config.token ? `?t=${config.token}` : ''}#${keyHex}`;
 
   // 7. Render and print QR code + metadata box AFTER createServer to safely use the real keyHex
   if (config.qr) {
@@ -189,7 +232,7 @@ async function main() {
   } else {
     console.log(`URL: ${url}`);
     if (config.mdns) {
-      console.log(`mDNS: http://${mdnsName}.local:${port}/#${keyHex}`);
+      console.log(`mDNS: http://${mdnsName}.local:${port}/${config.token ? `?t=${config.token}` : ''}#${keyHex}`);
     }
   }
 

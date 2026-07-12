@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const path = require('path');
 const readline = require('readline');
 
@@ -12,7 +13,16 @@ function validateToken(url, token) {
   try {
     const parsedUrl = new URL(url, 'http://localhost');
     const requestToken = parsedUrl.searchParams.get('t');
-    return requestToken === token;
+    if (!requestToken) return false;
+
+    const requestTokenBuf = Buffer.from(requestToken);
+    const tokenBuf = Buffer.from(token);
+
+    if (requestTokenBuf.length !== tokenBuf.length) {
+      crypto.timingSafeEqual(requestTokenBuf, requestTokenBuf);
+      return false;
+    }
+    return crypto.timingSafeEqual(requestTokenBuf, tokenBuf);
   } catch (err) {
     return false;
   }

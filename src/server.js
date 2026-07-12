@@ -10,8 +10,11 @@ const VERSION = pkg.version;
 const {
   DEFAULT_TIMEOUT_SECONDS,
   DEFAULT_RATE_LIMIT_WINDOW_MS,
-  DEFAULT_RATE_LIMIT_MAX
+  DEFAULT_RATE_LIMIT_MAX,
+  DEFAULT_MAX_CONNECTIONS
 } = require('./constants');
+
+const { validateToken, createConnectionLimiter } = require('./security');
 
 // Chunk size for converting Uint8Array to binary string.
 // A chunking strategy is necessary because String.fromCharCode.apply can throw a
@@ -85,6 +88,8 @@ async function createServer({
 
   const version = options.version || VERSION;
   const timeoutMs = (options.timeout != null ? options.timeout : DEFAULT_TIMEOUT_SECONDS) * 1000;
+  const maxConnections = options.maxConnections !== undefined ? options.maxConnections : DEFAULT_MAX_CONNECTIONS;
+  const connectionLimiter = maxConnections > 0 ? createConnectionLimiter(maxConnections) : null;
   
   const completedIPs = new Set();
   // Keep active transfer IPs locked for a short settle period so a retry that arrives
@@ -197,7 +202,7 @@ async function createServer({
         }
         
         setStatus("Fetching...");
-        const response = await fetch('${downloadPath}');
+        const response = await fetch('${downloadPath}' + window.location.search);
         if (!response.ok) {
           setStatus("Error: Link Expired");
           setClipText("Error: Link expired or already copied.");
@@ -365,7 +370,9 @@ async function createServer({
 </html>`;
 
   const server = http.createServer((req, res) => {
-    const { method, url } = req;
+    const { method } = req;
+    const parsedUrl = new URL(req.url, 'http://localhost');
+    const pathname = parsedUrl.pathname;
 
     const clientIp = req.socket.remoteAddress;
     if (!checkRateLimit(clientIp)) {
@@ -373,8 +380,15 @@ async function createServer({
       res.end('Too Many Requests');
       return;
     }
+
+    // Token validation:
+    if (pathname !== '/forge.min.js' && !validateToken(req.url, options.token)) {
+      res.writeHead(403, { 'Content-Type': 'text/plain' });
+      res.end('Forbidden');
+      return;
+    }
     
-    if (url === '/forge.min.js') {
+    if (pathname === '/forge.min.js') {
       const forgePath = path.join(__dirname, '../node_modules/node-forge/dist/forge.min.js');
       const forgeStream = fs.createReadStream(forgePath);
       forgeStream.on('error', () => {
@@ -395,7 +409,7 @@ async function createServer({
     }
 
     // Serve the HTML Decryptor Interface
-    if (url === '/' || url === `/${encodeURI(fileName)}`) {
+    if (pathname === '/' || pathname === `/${encodeURI(fileName)}`) {
       if (completedIPs.has(clientIp)) {
         res.writeHead(410, { 'Content-Type': 'text/plain' });
         res.end('This file has already been transferred.');
@@ -417,7 +431,7 @@ async function createServer({
     }
 
     // Reject unknown paths
-    if (url !== downloadPath) {
+    if (pathname !== downloadPath) {
       res.writeHead(404, { 'Content-Type': 'text/plain' });
       res.end('Not Found');
       return;
@@ -613,6 +627,14 @@ async function createServer({
   });
 
   server.on('connection', (socket) => {
+    if (connectionLimiter) {
+      const allowed = connectionLimiter.handleConnection(socket, () => {
+        socket.end('HTTP/1.1 429 Too Many Requests\r\nConnection: close\r\nContent-Type: text/plain\r\n\r\nToo Many Requests\r\n');
+      });
+      if (!allowed) {
+        return;
+      }
+    }
     sockets.add(socket);
     socket.once('close', () => sockets.delete(socket));
   });

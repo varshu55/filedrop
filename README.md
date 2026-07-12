@@ -55,6 +55,9 @@ filedrop --clipboard                # share your clipboard contents
 | `-p, --port <n>` | Specific port to bind (default: auto 8000-8999) |
 | `-m, --mdns` | Broadcast the file over the local network via mDNS |
 | `-t, --timeout <s>` | Seconds to wait for a connection (default: 300) |
+| `--token [token]` | Require a token parameter (?t=<token>) to access links. Generates a random 16-character hex token if empty. |
+| `--max-connections <n>` | Max concurrent TCP connections (default: 10, 0 to disable) |
+| `--no-warn-sensitive` | Bypass warning prompt before serving sensitive files |
 | `--clipboard` | Share clipboard contents instead of a file |
 | `--no-qr` | Suppress QR code, print URL only |
 | `--qr-compact` | Print QR code without surrounding metadata box |
