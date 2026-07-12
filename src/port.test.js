@@ -24,20 +24,31 @@ test('Port Manager', async (t) => {
   });
 
   await t.test('First port in use (fallback)', async () => {
+    let server;
     try {
-      const server = net.createServer();
+      server = net.createServer();
       await new Promise(r => server.listen(0, '0.0.0.0', r));
-      const p = server.address().port;
+      let p = server.address().port;
       
-      const port = await findAvailablePort(p, Math.min(p + 5, MAX_PORT));
-      assert.ok(port > p && port <= Math.min(p + 5, MAX_PORT));
+      // If the ephemeral port is too close to MAX_PORT, fall back to a safe lower port
+      if (p + 5 > MAX_PORT) {
+        server.close();
+        await new Promise(r => server.once('close', r));
+        p = 50000;
+        await new Promise(r => server.listen(p, '0.0.0.0', r));
+      }
       
-      server.close();
+      const port = await findAvailablePort(p, p + 5);
+      assert.ok(port > p && port <= p + 5);
     } catch (e) {
       if (e.code === 'MODULE_NOT_FOUND') {
         t.skip('port.js not implemented yet');
       } else {
         throw e;
+      }
+    } finally {
+      if (server) {
+        server.close();
       }
     }
   });
