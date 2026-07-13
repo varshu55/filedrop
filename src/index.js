@@ -4,6 +4,8 @@ const { parseArgs } = require('./cli');
 const path = require('path');
 const crypto = require('crypto');
 const clipboardy = require('clipboardy').default || require('clipboardy');
+const fs = require('fs');
+const { confirmSensitiveFile } = require('./security');
 
 // Assumed imports from other agents
 const network = require('./network');
@@ -34,6 +36,78 @@ const qr = require('./qr');
 async function main() {
   // 1. Parse and validate arguments
   const config = parseArgs(process.argv);
+
+  // Check for sensitive files
+  if (config.warnSensitive && !config.isClipboard) {
+    const readline = require('readline');
+
+    async function confirmUnreadablePath(p) {
+      console.log(`\x1b[33mWarning: Could not read/inspect path: ${p}. Proceed anyway? [y/N]\x1b[0m`);
+      const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+      });
+      return new Promise((resolve) => {
+        rl.question('', (answer) => {
+          rl.close();
+          resolve(answer.toLowerCase() === 'y');
+        });
+      });
+    }
+
+    async function getFilesRecursively(dir) {
+      let results = [];
+      let list;
+      try {
+        list = fs.readdirSync(dir);
+      } catch (err) {
+        const confirmed = await confirmUnreadablePath(dir);
+        if (!confirmed) {
+          console.log('Transfer aborted by user.');
+          process.exit(1);
+        }
+        return [];
+      }
+      for (const file of list) {
+        const filePath = path.join(dir, file);
+        let stat;
+        try {
+          stat = fs.statSync(filePath);
+        } catch (err) {
+          const confirmed = await confirmUnreadablePath(filePath);
+          if (!confirmed) {
+            console.log('Transfer aborted by user.');
+            process.exit(1);
+          }
+          continue;
+        }
+        if (stat && stat.isDirectory()) {
+          const subFiles = await getFilesRecursively(filePath);
+          results = results.concat(subFiles);
+        } else {
+          results.push(filePath);
+        }
+      }
+      return results;
+    }
+
+    let filesToCheck = [];
+    if (config.isMultiFile) {
+      filesToCheck = config.filePaths;
+    } else if (config.isDirectory) {
+      filesToCheck = [config.filePath].concat(await getFilesRecursively(config.filePath));
+    } else {
+      filesToCheck = [config.filePath];
+    }
+
+    for (const filePath of filesToCheck) {
+      const confirmed = await confirmSensitiveFile(filePath);
+      if (!confirmed) {
+        console.log('Transfer aborted by user.');
+        process.exit(1);
+      }
+    }
+  }
   
   // 2. Resolve absolute file path
   // Handled inside parseArgs, which returns an absolute config.filePath
@@ -139,7 +213,9 @@ async function main() {
       timeout: config.timeout,
       verbose: config.verbose,
       rateLimitWindow: config.rateLimitWindow,
-      rateLimitMax: config.rateLimitMax
+      rateLimitMax: config.rateLimitMax,
+      token: config.token,
+      maxConnections: config.maxConnections
     },
     onTransferStart: (currentCount, limit) => {
       isTransferring = true;
@@ -168,7 +244,7 @@ async function main() {
   });
 
   // Construct the absolute exact server URL using the real key returned by createServer
-  const url = `http://${ip}:${port}/#${keyHex}`;
+  const url = `http://${ip}:${port}/${config.token ? `?t=${encodeURIComponent(config.token)}` : ''}#${keyHex}`;
 
   // 7. Render and print QR code + metadata box AFTER createServer to safely use the real keyHex
   if (config.qr) {
@@ -189,7 +265,7 @@ async function main() {
   } else {
     console.log(`URL: ${url}`);
     if (config.mdns) {
-      console.log(`mDNS: http://${mdnsName}.local:${port}/#${keyHex}`);
+      console.log(`mDNS: http://${mdnsName}.local:${port}/${config.token ? `?t=${encodeURIComponent(config.token)}` : ''}#${keyHex}`);
     }
   }
 

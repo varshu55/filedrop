@@ -19,9 +19,12 @@ test('Connection timeout integration', async (t) => {
     }
 
     const filePath = createTempFile(1024);
-    const cliPath = path.join(__dirname, '../../src/cli.js');
+    const cliPath = path.join(__dirname, '../../bin/filedrop.js');
 
-    const filedropProcess = spawn(process.execPath, [cliPath, filePath, '--timeout', '2', '--no-mdns']);
+    const filedropProcess = spawn(process.execPath, [cliPath, filePath, '--port', '8125', '--timeout', '2', '--no-mdns']);
+    
+    // Satisfy the pre-existing device limit prompt
+    filedropProcess.stdin.write('\n');
     
     const code = await new Promise(resolve => filedropProcess.on('exit', resolve));
     assert.strictEqual(code, 5, 'Process should exit with code 5 after connection timeout');
