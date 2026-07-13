@@ -128,6 +128,25 @@ test('Server Core', async (t) => {
     await shutdown();
   });
 
+  await t.test('GET downloadPath with Range header returns 200 and full content', async () => {
+    const filePath = createTempFile(1024, '.txt');
+    const { server, shutdown, downloadPath } = await createServer({
+      filePath,
+      port: 0,
+      onTransferComplete: () => {},
+      onTransferError: () => {}
+    });
+
+    const port = server.address().port;
+    const url = `http://127.0.0.1:${port}${downloadPath}`;
+    const res = await httpClient(url, { headers: { 'Range': 'bytes=0-' } });
+
+    assert.strictEqual(res.statusCode, 200);
+    assert.strictEqual(res.body.length, 1024 + 28);
+
+    await shutdown();
+  });
+
   await t.test('HEAD downloadPath returns headers, no body', async () => {
     const filePath = createTempFile(1024, '.txt');
     const { server, shutdown, downloadPath } = await createServer({

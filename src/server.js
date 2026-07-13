@@ -438,12 +438,6 @@ async function createServer({
       return;
     }
 
-    if (req.headers.range) {
-      res.writeHead(416, { 'Content-Type': 'text/plain' });
-      res.end('Range Not Satisfiable');
-      return;
-    }
-
     if (method === 'HEAD') {
       res.setHeader('Content-Type', contentType);
       res.setHeader('Content-Disposition', contentDisposition);
