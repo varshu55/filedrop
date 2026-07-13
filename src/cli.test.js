@@ -4,6 +4,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { parseArgs } = require('./cli.js');
+const { MIN_PORT, MAX_PORT } = require('./port.js');
 const { createTempFile, cleanupTempFiles } = require('../test/helpers/create-temp-file.js');
 const { execFileSync } = require('node:child_process');
 const path = require('node:path');
@@ -57,6 +58,80 @@ test('CLI Parser', async (t) => {
     assert.strictEqual(config.shutdownGraceMs, 10000);
   });
 
+
+  await t.test('Parses valid --port option', () => {
+    const filePath = createTempFile(1024, '.txt');
+    
+    // Test MIN_PORT
+    let config = parseArgs(['node', 'filedrop', filePath, '--port', String(MIN_PORT)]);
+    assert.strictEqual(config.port, MIN_PORT);
+
+    // Test MAX_PORT
+    config = parseArgs(['node', 'filedrop', filePath, '--port', String(MAX_PORT)]);
+    assert.strictEqual(config.port, MAX_PORT);
+
+    // Test custom port in range
+    config = parseArgs(['node', 'filedrop', filePath, '--port', '8080']);
+    assert.strictEqual(config.port, 8080);
+  });
+
+  await t.test('Fails on invalid --port option (out of bounds)', () => {
+    const filePath = createTempFile(1024, '.txt');
+    const originalExit = process.exit;
+    const originalError = console.error;
+    let exitCode = null;
+    let errors = [];
+
+    process.exit = (code) => {
+      exitCode = code;
+    };
+    console.error = (msg) => {
+      errors.push(msg);
+    };
+
+    try {
+      // Test below MIN_PORT
+      parseArgs(['node', 'filedrop', filePath, '--port', String(MIN_PORT - 1)]);
+      assert.strictEqual(exitCode, 1);
+      assert.ok(errors.some(err => err.includes(`must be a valid integer between ${MIN_PORT} and ${MAX_PORT}`)));
+
+      // Reset trackers
+      exitCode = null;
+      errors = [];
+
+      // Test above MAX_PORT
+      parseArgs(['node', 'filedrop', filePath, '--port', String(MAX_PORT + 1)]);
+      assert.strictEqual(exitCode, 1);
+      assert.ok(errors.some(err => err.includes(`must be a valid integer between ${MIN_PORT} and ${MAX_PORT}`)));
+    } finally {
+      process.exit = originalExit;
+      console.error = originalError;
+    }
+  });
+
+  await t.test('Fails on invalid --port option (non-integer)', () => {
+    const filePath = createTempFile(1024, '.txt');
+    const originalExit = process.exit;
+    const originalError = console.error;
+    let exitCode = null;
+    let errors = [];
+
+    process.exit = (code) => {
+      exitCode = code;
+    };
+    console.error = (msg) => {
+      errors.push(msg);
+    };
+
+    try {
+      parseArgs(['node', 'filedrop', filePath, '--port', 'not-a-number']);
+      assert.strictEqual(exitCode, 1);
+      assert.ok(errors.some(err => err.includes(`must be a valid integer between ${MIN_PORT} and ${MAX_PORT}`)));
+    } finally {
+      process.exit = originalExit;
+      console.error = originalError;
+    }
+
   await t.test('Parses custom token, connection limit, and sensitive warning options', () => {
     const filePath = createTempFile(1024, '.txt');
     const config = parseArgs([
@@ -97,5 +172,7 @@ test('CLI Parser', async (t) => {
     assert.strictEqual(typeof config2.token, 'string');
     assert.strictEqual(config2.token.length, 16);
     assert.strictEqual(config2.maxConnections, 8);
+
   });
 });
+
