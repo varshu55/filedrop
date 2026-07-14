@@ -26,7 +26,7 @@ class LifecycleManager extends EventEmitter {
   constructor(config = {}) {
     super();
     this.state = STATES.INITIALIZING;
-    this.connectionTimeoutSeconds = config.timeout || 300;
+    this.connectionTimeoutSeconds = typeof config.timeout === 'number' ? config.timeout : 300;
     this.transferTimeoutSeconds = 60; // Hardcoded 60s limit for transfer after connection
     this.stdoutFlushTimeout = config.stdoutFlushTimeout ?? 500;
     const failsafeInput = Number(config.failsafeExitTimeout);
@@ -128,9 +128,11 @@ class LifecycleManager extends EventEmitter {
 
   _startConnectionTimeout() {
     this._cancelConnectionTimeout();
-    this.connectionTimer = setTimeout(() => {
-      this.transition(STATES.TIMEOUT);
-    }, this.connectionTimeoutSeconds * 1000);
+    if (this.connectionTimeoutSeconds > 0) {
+      this.connectionTimer = setTimeout(() => {
+        this.transition(STATES.TIMEOUT);
+      }, this.connectionTimeoutSeconds * 1000);
+    }
   }
 
   _cancelConnectionTimeout() {
@@ -175,28 +177,48 @@ class LifecycleManager extends EventEmitter {
     process.removeAllListeners('SIGINT');
     process.removeAllListeners('SIGTERM');
 
-    // 3. Call mdns.deregister() — await with 2s timeout
-    if (this.mdns && typeof this.mdns.deregister === 'function') {
-      try {
-        await this._withTimeout(this.mdns.deregister(), 2000);
-      } catch (err) {
+    // 3. Emit 'shutdown' event allowing modules to add their cleanup promises
+    const cleanups = [];
+    this.emit('shutdown', cleanups);
+
+    // Wrap each event-driven cleanup with a 3s timeout
+    const eventCleanupPromises = cleanups.map(p =>
+      this._withTimeout(p, 3000).catch(err => {
         this.emit('shutdown-error', {
-          phase: 'mdns.deregister',
+          phase: 'event-cleanup',
           error: err
         });
-      }
+      })
+    );
+
+    // 4. Backwards compatibility with direct calls
+    const legacyCleanups = [];
+    if (this.mdns && typeof this.mdns.deregister === 'function') {
+      legacyCleanups.push(
+        this._withTimeout(this.mdns.deregister(), 2000).catch(err => {
+          this.emit('shutdown-error', {
+            phase: 'mdns.deregister',
+            error: err
+          });
+        })
+      );
     }
 
-    // 4. Call server.shutdown() — await with 3s timeout
     if (this.server && typeof this.server.shutdown === 'function') {
-      try {
-        await this._withTimeout(this.server.shutdown(), 3000);
-      } catch (err) {
-        this.emit('shutdown-error', {
-          phase: 'server.shutdown',
-          error: err
-        });
-      }
+      legacyCleanups.push(
+        this._withTimeout(this.server.shutdown(), 3000).catch(err => {
+          this.emit('shutdown-error', {
+            phase: 'server.shutdown',
+            error: err
+          });
+        })
+      );
+    }
+
+    // Await all cleanups
+    const allCleanups = eventCleanupPromises.concat(legacyCleanups);
+    if (allCleanups.length > 0) {
+      await Promise.all(allCleanups);
     }
 
     // Snapshot the Set first — destroy() can trigger the 'close' handler

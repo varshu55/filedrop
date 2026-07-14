@@ -171,9 +171,21 @@ function getInterface(options = {}) {
     return selected;
 }
 
+function bind(lifecycle) {
+    lifecycle.on('network:discover', async (options) => {
+        try {
+            const iface = await module.exports.getInterface(options);
+            lifecycle.emit('network:resolved', iface);
+        } catch (err) {
+            lifecycle.emit('network:error', err);
+        }
+    });
+}
+
 module.exports = {
     getInterface,
     getFilterReason,
     scoreInterface,
-    isValidIPv4
+    isValidIPv4,
+    bind
 };

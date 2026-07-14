@@ -687,4 +687,60 @@ async function createServer({
   });
 }
 
-module.exports = { createServer };
+function bind(lifecycle) {
+  let activeShutdown = null;
+
+  lifecycle.on('server:start', async (params) => {
+    try {
+      const result = await module.exports.createServer({
+        ...params,
+        onTransferStart: (currentCount, limit) => {
+          lifecycle.emit('server:transfer-start', { currentCount, limit });
+          if (typeof params.onTransferStart === 'function') {
+            params.onTransferStart(currentCount, limit);
+          }
+        },
+        onTransferComplete: (completedCount, downloadLimit) => {
+          lifecycle.emit('server:transfer-complete', { completedCount, downloadLimit });
+          if (typeof params.onTransferComplete === 'function') {
+            params.onTransferComplete(completedCount, downloadLimit);
+          }
+        },
+        onTransferError: (err) => {
+          lifecycle.emit('server:transfer-error', err);
+          if (typeof params.onTransferError === 'function') {
+            params.onTransferError(err);
+          }
+        }
+      });
+
+      activeShutdown = result.shutdown;
+
+      lifecycle.emit('server:started', { keyHex: result.keyHex, downloadPath: result.downloadPath });
+    } catch (err) {
+      lifecycle.emit('server:error', err);
+    }
+  });
+
+  lifecycle.on('server:shutdown', async () => {
+    if (activeShutdown) {
+      try {
+        await activeShutdown();
+        activeShutdown = null;
+        lifecycle.emit('server:shutdown-complete');
+      } catch (err) {
+        lifecycle.emit('server:error', err);
+      }
+    } else {
+      lifecycle.emit('server:shutdown-complete');
+    }
+  });
+
+  lifecycle.on('shutdown', (cleanups) => {
+    if (activeShutdown) {
+      cleanups.push(activeShutdown());
+    }
+  });
+}
+
+module.exports = { createServer, bind };
