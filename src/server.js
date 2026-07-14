@@ -509,6 +509,7 @@ async function createServer({
         transferState = 'timed-out';
         activeIPs.delete(clientIp);
         transferConcluded = true;
+        if (sourceStream) sourceStream.destroy();
         req.socket.destroy();
         onTransferError(new Error('ERR_TRANSFER_TIMEOUT'));
       }
