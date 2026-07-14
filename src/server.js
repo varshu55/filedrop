@@ -2,7 +2,14 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const archiver = require('archiver');
+let ZipArchive = null;
+async function getZipArchive() {
+  if (!ZipArchive) {
+    const mod = await import('archiver');
+    ZipArchive = mod.ZipArchive;
+  }
+  return ZipArchive;
+}
 const mime = require('mime');
 const pkg = require('../package.json');
 const VERSION = pkg.version;
@@ -366,7 +373,7 @@ async function createServer({
 </body>
 </html>`;
 
-  const server = http.createServer((req, res) => {
+  const server = http.createServer(async (req, res) => {
     const { method } = req;
     let pathname = '/';
     try {
@@ -553,7 +560,8 @@ async function createServer({
       if (isClipboard) {
         sourceStream = require('stream').Readable.from([Buffer.from(clipboardData, 'utf8')]);
       } else if (isMultiFile) {
-        const archive = new archiver.ZipArchive({ zlib: { level: 5 } });
+        const ZipArchiveClass = await getZipArchive();
+        const archive = new ZipArchiveClass({ zlib: { level: 5 } });
         const addedNames = new Set();
         for (const file of filePaths) {
           let name = path.basename(file);
@@ -572,7 +580,8 @@ async function createServer({
         archive.finalize();
         sourceStream = archive;
       } else if (isDirectory) {
-        const archive = new archiver.ZipArchive({ zlib: { level: 5 } });
+        const ZipArchiveClass = await getZipArchive();
+        const archive = new ZipArchiveClass({ zlib: { level: 5 } });
         archive.directory(filePath, path.basename(filePath));
         archive.finalize();
         sourceStream = archive;
