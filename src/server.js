@@ -679,7 +679,7 @@ async function createServer({
 
   return new Promise((resolve, reject) => {
     server.once('error', reject);
-    server.listen(port, () => {
+    server.listen(port, '0.0.0.0', () => {
       server.removeListener('error', reject);
       // Expose keyHex here
       resolve({ server, shutdown, keyHex, downloadPath });

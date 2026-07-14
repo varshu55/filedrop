@@ -422,10 +422,22 @@ test('Server Core', async (t) => {
     const port = server.address().port;
 
     const socket1 = new (require('net').Socket)();
-    await new Promise(resolve => socket1.connect(port, '127.0.0.1', resolve));
+    await new Promise((resolve, reject) => {
+      socket1.once('error', reject);
+      socket1.connect(port, '127.0.0.1', () => {
+        socket1.removeListener('error', reject);
+        resolve();
+      });
+    });
 
     const socket2 = new (require('net').Socket)();
-    await new Promise(resolve => socket2.connect(port, '127.0.0.1', resolve));
+    await new Promise((resolve, reject) => {
+      socket2.once('error', reject);
+      socket2.connect(port, '127.0.0.1', () => {
+        socket2.removeListener('error', reject);
+        resolve();
+      });
+    });
     
     let receivedData = '';
     socket2.on('data', (data) => {
