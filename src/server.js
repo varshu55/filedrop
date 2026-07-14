@@ -7,6 +7,21 @@ const mime = require('mime');
 const pkg = require('../package.json');
 const VERSION = pkg.version;
 
+const {
+  DEFAULT_TIMEOUT_SECONDS,
+  DEFAULT_SHUTDOWN_TIMEOUT_MS,
+  DEFAULT_RATE_LIMIT_WINDOW_MS,
+  DEFAULT_RATE_LIMIT_MAX,
+  DEFAULT_MAX_CONNECTIONS
+} = require('./constants');
+
+const { validateToken, createConnectionLimiter } = require('./security');
+
+// Chunk size for converting Uint8Array to binary string.
+// A chunking strategy is necessary because String.fromCharCode.apply can throw a
+// "Maximum call stack size exceeded" error if the array is too large.
+const U8_TO_BINARY_CHUNK_SIZE = 10000;
+
 function escapeHtml(unsafe) {
     return unsafe
          .replace(/&/g, "&amp;")
@@ -73,7 +88,9 @@ async function createServer({
   const contentDisposition = `attachment; filename="${fileName.replace(/"/g, '\\"')}"; filename*=UTF-8''${encodedFileName}`;
 
   const version = options.version || VERSION;
-  const timeoutMs = options.timeout ? options.timeout * 1000 : 60000;
+  const timeoutMs = (options.timeout != null ? options.timeout : DEFAULT_TIMEOUT_SECONDS) * 1000;
+  const maxConnections = options.maxConnections !== undefined ? options.maxConnections : DEFAULT_MAX_CONNECTIONS;
+  const connectionLimiter = maxConnections > 0 ? createConnectionLimiter(maxConnections) : null;
   
   const completedIPs = new Set();
   // Keep active transfer IPs locked for a short settle period so a retry that arrives
@@ -83,9 +100,9 @@ async function createServer({
   const sockets = new Set();
   const transferCleanupDelayMs = options.transferCleanupDelay ?? 50;
 
-  // Rate limiting: max 30 requests per 10 seconds per IP by default
-  const rateLimitWindow = options.rateLimitWindow ?? 10000;
-  const rateLimitMax = options.rateLimitMax ?? 30;
+  // Rate limiting: max requests per window per IP by default
+  const rateLimitWindow = options.rateLimitWindow ?? DEFAULT_RATE_LIMIT_WINDOW_MS;
+  const rateLimitMax = options.rateLimitMax ?? DEFAULT_RATE_LIMIT_MAX;
   const rateLimitRetryAfter = Math.ceil(rateLimitWindow / 1000);
   const ipRequestCounts = new Map(); // Maps IP -> Array of timestamps
 
@@ -154,9 +171,10 @@ async function createServer({
   </div>
   <script src="/forge.min.js"></script>
   <script>
+    // Chunking is necessary to avoid "Maximum call stack size exceeded" errors from String.fromCharCode.apply
     function u8ToBinaryString(u8) {
       let res = '';
-      const chunk = 10000;
+      const chunk = ${U8_TO_BINARY_CHUNK_SIZE};
       for (let i = 0; i < u8.length; i += chunk) {
         res += String.fromCharCode.apply(null, u8.subarray(i, i + chunk));
       }
@@ -185,13 +203,11 @@ async function createServer({
         }
         
         setStatus("Fetching...");
-        const response = await fetch('${downloadPath}');
+        const response = await fetch('${downloadPath}' + window.location.search);
         if (!response.ok) {
           setStatus("Error: Link Expired");
           setClipText("Error: Link expired or already copied.");
-          if (${isClipboard}) {
-            window.close();
-          }
+          ${isClipboard ? 'window.close();' : ''}
           return;
         }
 
@@ -343,9 +359,7 @@ async function createServer({
         setClipText("Error: Decryption failed or link expired.");
         if (statusEl) statusEl.style.color = "#FF453A";
         console.error(err);
-        if (${isClipboard}) {
-          window.close();
-        }
+        ${isClipboard ? 'window.close();' : ''}
       }
     })();
   </script>
@@ -353,7 +367,14 @@ async function createServer({
 </html>`;
 
   const server = http.createServer((req, res) => {
-    const { method, url } = req;
+    const { method } = req;
+    let pathname = '/';
+    try {
+      const parsedUrl = new URL(req.url, 'http://localhost');
+      pathname = decodeURIComponent(parsedUrl.pathname);
+    } catch (err) {
+      // Fallback to raw url or root if decoding fails
+    }
 
     const clientIp = req.socket.remoteAddress;
     if (!checkRateLimit(clientIp)) {
@@ -361,8 +382,15 @@ async function createServer({
       res.end('Too Many Requests');
       return;
     }
+
+    // Token validation:
+    if (pathname !== '/forge.min.js' && !validateToken(req.url, options.token)) {
+      res.writeHead(403, { 'Content-Type': 'text/plain' });
+      res.end('Forbidden');
+      return;
+    }
     
-    if (url === '/forge.min.js') {
+    if (pathname === '/forge.min.js') {
       const forgePath = path.join(__dirname, '../node_modules/node-forge/dist/forge.min.js');
       const forgeStream = fs.createReadStream(forgePath);
       forgeStream.on('error', () => {
@@ -383,7 +411,7 @@ async function createServer({
     }
 
     // Serve the HTML Decryptor Interface
-    if (url === '/' || url === `/${encodeURI(fileName)}`) {
+    if (pathname === '/' || pathname === `/${fileName}`) {
       if (completedIPs.has(clientIp)) {
         res.writeHead(410, { 'Content-Type': 'text/plain' });
         res.end('This file has already been transferred.');
@@ -405,7 +433,7 @@ async function createServer({
     }
 
     // Reject unknown paths
-    if (url !== downloadPath) {
+    if (pathname !== downloadPath) {
       res.writeHead(404, { 'Content-Type': 'text/plain' });
       res.end('Not Found');
       return;
@@ -470,19 +498,22 @@ async function createServer({
     let responseFinished = false;
     let transferState = 'pending';
     let cleanupTimer = null;
+    let transferConcluded = false;
 
-    const transferTimeout = setTimeout(() => {
+    const transferTimeout = timeoutMs > 0 ? setTimeout(() => {
       if (transferState === 'pending') {
         transferState = 'timed-out';
+        transferConcluded = true;
         req.socket.destroy();
         onTransferError(new Error('ERR_TRANSFER_TIMEOUT'));
       }
-    }, timeoutMs);
+    }, timeoutMs) : null;
 
     const markTransferComplete = () => {
       if (transferState === 'complete' || transferState === 'timed-out') return;
       transferState = 'complete';
-      clearTimeout(transferTimeout);
+      transferConcluded = true;
+      if (transferTimeout) clearTimeout(transferTimeout);
       if (cleanupTimer) clearTimeout(cleanupTimer);
       activeIPs.delete(clientIp);
       completedIPs.add(clientIp);
@@ -493,7 +524,8 @@ async function createServer({
       if (transferState === 'complete' || transferState === 'timed-out') return;
       if (transferState === 'disconnect') return;
       transferState = 'disconnect';
-      clearTimeout(transferTimeout);
+      transferConcluded = true;
+      if (transferTimeout) clearTimeout(transferTimeout);
       cleanupTimer = setTimeout(() => {
         if (transferState !== 'disconnect') return;
         transferState = 'disconnected';
@@ -593,9 +625,22 @@ async function createServer({
   });
 
   server.on('connection', (socket) => {
+    if (connectionLimiter) {
+      const allowed = connectionLimiter.handleConnection(socket, () => {
+        socket.end('HTTP/1.1 429 Too Many Requests\r\nConnection: close\r\nContent-Type: text/plain\r\n\r\nToo Many Requests\r\n');
+      });
+      if (!allowed) {
+        return;
+      }
+    }
     sockets.add(socket);
     socket.once('close', () => sockets.delete(socket));
   });
+
+  const configuredShutdownTimeoutMs = options.shutdownTimeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS;
+  const shutdownTimeoutMs = Number.isSafeInteger(configuredShutdownTimeoutMs) && configuredShutdownTimeoutMs > 0
+    ? configuredShutdownTimeoutMs
+    : DEFAULT_SHUTDOWN_TIMEOUT_MS;
 
   const shutdown = () => {
     clearInterval(rateLimitCleanup);
@@ -606,7 +651,7 @@ async function createServer({
         resolved = true;
         resolve();
       };
-      const forceTimeout = setTimeout(finish, 3000);
+      const forceTimeout = setTimeout(finish, shutdownTimeoutMs);
       
       if (typeof options.onShutdown === 'function') {
         try { options.onShutdown(); } catch (err) { }

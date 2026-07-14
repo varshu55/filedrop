@@ -4,7 +4,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const net = require('net');
-const { findAvailablePort } = require('./port.js');
+const { findAvailablePort, MAX_PORT } = require('./port.js');
 
 test('Port Manager', async (t) => {
   await t.test('Auto-selection success on first try', async () => {
@@ -24,19 +24,31 @@ test('Port Manager', async (t) => {
   });
 
   await t.test('First port in use (fallback)', async () => {
+    let server;
     try {
-      const server = net.createServer().listen(8000, '0.0.0.0');
-      await new Promise(r => server.once('listening', r));
+      server = net.createServer();
+      await new Promise(r => server.listen(0, '0.0.0.0', r));
+      let p = server.address().port;
       
-      const port = await findAvailablePort(8000, 8999);
-      assert.ok(port > 8000 && port <= 8999);
+      // If the ephemeral port is too close to MAX_PORT, fall back to a safe lower port
+      if (p + 5 > MAX_PORT) {
+        server.close();
+        await new Promise(r => server.once('close', r));
+        p = 50000;
+        await new Promise(r => server.listen(p, '0.0.0.0', r));
+      }
       
-      server.close();
+      const port = await findAvailablePort(p, p + 5);
+      assert.ok(port > p && port <= p + 5);
     } catch (e) {
       if (e.code === 'MODULE_NOT_FOUND') {
         t.skip('port.js not implemented yet');
       } else {
         throw e;
+      }
+    } finally {
+      if (server) {
+        server.close();
       }
     }
   });

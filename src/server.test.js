@@ -306,4 +306,196 @@ test('Server Core', async (t) => {
 
     await shutdown();
   });
+
+  await t.test('Transfer timeout: custom timeout triggers ERR_TRANSFER_TIMEOUT', async () => {
+    const filePath = createTempFile(2 * 1024 * 1024, '.txt');
+    let errorCalled = false;
+    let errorPromiseResolve;
+    const errorPromise = new Promise(r => errorPromiseResolve = r);
+
+    const { server, shutdown, downloadPath } = await createServer({
+      filePath,
+      port: 0,
+      options: {
+        timeout: 0.1 // 100ms
+      },
+      onTransferComplete: () => {},
+      onTransferError: (err) => {
+        if (err.message === 'ERR_TRANSFER_TIMEOUT') {
+          errorCalled = true;
+          errorPromiseResolve();
+        }
+      }
+    });
+
+    const port = server.address().port;
+    const url = `http://127.0.0.1:${port}${downloadPath}`;
+
+    const req = http.get(url, () => {
+      // Keep open, do not consume
+    });
+
+    await errorPromise;
+    assert.strictEqual(errorCalled, true);
+    req.destroy();
+    await shutdown();
+  });
+
+  await t.test('Transfer timeout: 0 disables timeout', async () => {
+    const filePath = createTempFile(2 * 1024 * 1024, '.txt');
+    let errorCalled = false;
+
+    const { server, shutdown, downloadPath } = await createServer({
+      filePath,
+      port: 0,
+      options: {
+        timeout: 0
+      },
+      onTransferComplete: () => {},
+      onTransferError: (err) => {
+        if (err.message === 'ERR_TRANSFER_TIMEOUT') {
+          errorCalled = true;
+        }
+      }
+    });
+
+    const port = server.address().port;
+    const url = `http://127.0.0.1:${port}${downloadPath}`;
+
+    const req = http.get(url, () => {
+      // Keep open, do not consume
+    });
+
+    await new Promise(resolve => setTimeout(resolve, 150));
+    assert.strictEqual(errorCalled, false);
+    req.destroy();
+    await shutdown();
+  });
+
+  await t.test('Token protection: restricts access unless correct token is provided', async () => {
+    const filePath = createTempFile(1024, '.txt');
+    const { server, shutdown, downloadPath } = await createServer({
+      filePath,
+      port: 0,
+      options: {
+        token: 'mysecret'
+      },
+      onTransferComplete: () => {},
+      onTransferError: () => {}
+    });
+
+    const port = server.address().port;
+
+    const res1 = await httpClient(`http://127.0.0.1:${port}/`);
+    assert.strictEqual(res1.statusCode, 403);
+
+    const res2 = await httpClient(`http://127.0.0.1:${port}/?t=wrong`);
+    assert.strictEqual(res2.statusCode, 403);
+
+    const res3 = await httpClient(`http://127.0.0.1:${port}/?t=mysecret`);
+    assert.strictEqual(res3.statusCode, 200);
+
+    const res4 = await httpClient(`http://127.0.0.1:${port}/forge.min.js`);
+    assert.strictEqual(res4.statusCode, 200);
+
+    const res5 = await httpClient(`http://127.0.0.1:${port}${downloadPath}`);
+    assert.strictEqual(res5.statusCode, 403);
+
+    const res6 = await httpClient(`http://127.0.0.1:${port}${downloadPath}?t=mysecret`);
+    assert.strictEqual(res6.statusCode, 200);
+
+    await shutdown();
+  });
+
+  await t.test('Connection limiting: rejects connections beyond maxConnections', async () => {
+    const filePath = createTempFile(1024, '.txt');
+    const { server, shutdown } = await createServer({
+      filePath,
+      port: 0,
+      options: {
+        maxConnections: 1
+      },
+      onTransferComplete: () => {},
+      onTransferError: () => {}
+    });
+
+    const port = server.address().port;
+
+    const socket1 = new (require('net').Socket)();
+    await new Promise(resolve => socket1.connect(port, '127.0.0.1', resolve));
+
+    const socket2 = new (require('net').Socket)();
+    await new Promise(resolve => socket2.connect(port, '127.0.0.1', resolve));
+    
+    let receivedData = '';
+    socket2.on('data', (data) => {
+      receivedData += data.toString();
+    });
+
+    socket2.write('GET / HTTP/1.1\r\nHost: localhost\r\n\r\n');
+
+    await new Promise(resolve => {
+      socket2.on('end', resolve);
+      socket2.on('error', () => resolve());
+      setTimeout(resolve, 500);
+    });
+
+    assert.ok(receivedData.includes('HTTP/1.1 429 Too Many Requests'), 'Second connection should be rejected with 429');
+
+    socket1.destroy();
+    socket2.destroy();
+    await shutdown();
+  });
+
+  await t.test('Custom shutdownTimeoutMs controls the shutdown force-timeout', async () => {
+    const filePath = createTempFile(1024, '.txt');
+    const { server, shutdown } = await createServer({
+      filePath,
+      port: 0,
+      options: {
+        shutdownTimeoutMs: 200
+      },
+      onTransferComplete: () => {},
+      onTransferError: () => {}
+    });
+
+    // Simulate a server.close() that never invokes its callback (e.g. a lingering
+    // keep-alive socket), so shutdown() must fall back to the configured force-timeout.
+    const originalClose = server.close.bind(server);
+    server.close = () => {};
+
+    const start = Date.now();
+    await shutdown();
+    const elapsed = Date.now() - start;
+
+    assert.ok(elapsed >= 190, `expected shutdown to wait ~200ms, took ${elapsed}ms`);
+    assert.ok(elapsed < 1000, `expected shutdown to resolve shortly after the custom timeout, took ${elapsed}ms`);
+
+    // Actually release the underlying listener now that the timing assertion is done.
+    await new Promise(resolve => originalClose(resolve));
+  });
+
+  await t.test('Decoded filename route matching: correctly resolves paths with spaces/special characters', async () => {
+    const tempDir = os.tmpdir();
+    const filePath = path.join(tempDir, 'file name with space.txt');
+    fs.writeFileSync(filePath, 'content');
+
+    const { server, shutdown } = await createServer({
+      filePath,
+      port: 0,
+      onTransferComplete: () => {},
+      onTransferError: () => {}
+    });
+
+    try {
+      const port = server.address().port;
+      const res = await httpClient(`http://127.0.0.1:${port}/file%20name%20with%20space.txt`);
+      assert.strictEqual(res.statusCode, 200);
+    } finally {
+      await shutdown();
+      try {
+        fs.unlinkSync(filePath);
+      } catch (_) {}
+    }
+  });
 });
