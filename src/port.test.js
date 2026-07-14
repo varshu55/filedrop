@@ -25,7 +25,7 @@ test('Port Manager', async (t) => {
 
   await t.test('First port in use (fallback)', async () => {
     try {
-      const server = net.createServer().listen(8000);
+      const server = net.createServer().listen(8000, '0.0.0.0');
       await new Promise(r => server.once('listening', r));
       
       const port = await findAvailablePort(8000, 8999);

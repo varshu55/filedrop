@@ -443,6 +443,7 @@ async function createServer({
       res.setHeader('Content-Disposition', contentDisposition);
       res.setHeader('Cache-Control', 'no-store');
       res.setHeader('Connection', 'close');
+      res.setHeader('Accept-Ranges', 'none');
       res.setHeader('X-Filedrop-Version', version);
       res.setHeader('X-Transfer-ID', transferId);
       if (!isDirectory && !isClipboard && !isMultiFile) res.setHeader('Content-Length', fileStat.size + 28);
@@ -460,6 +461,7 @@ async function createServer({
     res.setHeader('Content-Disposition', contentDisposition);
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Connection', 'close');
+    res.setHeader('Accept-Ranges', 'none');
     res.setHeader('X-Filedrop-Version', version);
     res.setHeader('X-Transfer-ID', transferId);
     res.setHeader('Access-Control-Expose-Headers', 'Content-Length');

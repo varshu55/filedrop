@@ -142,6 +142,7 @@ test('Server Core', async (t) => {
     const res = await httpClient(url, { headers: { 'Range': 'bytes=0-' } });
 
     assert.strictEqual(res.statusCode, 200);
+    assert.strictEqual(res.headers['accept-ranges'], 'none');
     assert.strictEqual(res.body.length, 1024 + 28);
 
     await shutdown();
