@@ -142,8 +142,16 @@ async function probe(instance, name, maxSuffix = 10) {
 
       const onResponse = (packet) => {
         const answers = [].concat(packet.answers || [], packet.additionals || [], packet.authorities || []);
+        
         if (answers.some(ans => ans.name === candidateService)) {
           hasConflict = true;
+        }
+
+        const hasAnyPeer = answers.some(ans => 
+          ans.name && ans.name.endsWith('-filedrop._http._tcp.local')
+        );
+
+        if (hasAnyPeer) {
           peerFound = true;
           module.exports.emit('peer-found', packet);
         }
@@ -153,7 +161,10 @@ async function probe(instance, name, maxSuffix = 10) {
 
       try {
         instance.query({
-          questions: [{ name: candidateService, type: 'ANY' }]
+          questions: [
+            { name: candidateService, type: 'ANY' },
+            { name: '_http._tcp.local', type: 'PTR' }
+          ]
         });
       } catch (e) {
         instance.removeListener('response', onResponse);

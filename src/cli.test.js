@@ -179,14 +179,17 @@ test('CLI Parser', async (t) => {
   await t.test('Parses --mesh, --no-mesh, and --signal-url options', () => {
     const filePath = createTempFile(1024, '.txt');
     
-    // 1. With --mesh
+    // 1. With --mesh and --signal-url
     const configMesh = parseArgs([
       'node',
       'filedrop',
       filePath,
-      '--mesh'
+      '--mesh',
+      '--signal-url',
+      'ws://localhost'
     ]);
     assert.strictEqual(configMesh.mesh, true);
+    assert.strictEqual(configMesh.signalUrl, 'ws://localhost');
 
     // 2. With --no-mesh
     const configNoMesh = parseArgs([
@@ -214,6 +217,30 @@ test('CLI Parser', async (t) => {
       'ws://my-signaling-server.local'
     ]);
     assert.strictEqual(configSignal.signalUrl, 'ws://my-signaling-server.local');
+  });
+
+  await t.test('Fails when --mesh is specified without --signal-url', () => {
+    const filePath = createTempFile(1024, '.txt');
+    const originalExit = process.exit;
+    const originalError = console.error;
+    let exitCode = null;
+    let errors = [];
+
+    process.exit = (code) => {
+      exitCode = code;
+    };
+    console.error = (msg) => {
+      errors.push(msg);
+    };
+
+    try {
+      parseArgs(['node', 'filedrop', filePath, '--mesh']);
+      assert.strictEqual(exitCode, 1);
+      assert.ok(errors.some(err => err.includes('--signal-url is required when using --mesh')));
+    } finally {
+      process.exit = originalExit;
+      console.error = originalError;
+    }
   });
 });
 

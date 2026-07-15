@@ -25,6 +25,9 @@
 async function pickTransport({ mesh, signalUrl, mdns, timeoutMs = 3000, verbose = false } = {}) {
   // Step 1: forceMesh
   if (mesh === true) {
+    if (!signalUrl) {
+      throw new Error('Cannot force Mesh: signaling URL is required');
+    }
     if (verbose) {
       console.log('[filedrop:transport] Step 1 (forceMesh): Mesh explicitly forced via CLI flag. Selecting Mesh.');
     }

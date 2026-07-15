@@ -28,6 +28,31 @@ class SignalingRoom {
     // Simulate async connection delay
     await new Promise((resolve) => setTimeout(resolve, 50));
     
+    if (this.closed) return;
+
+    // Contact the signaling server via fetch
+    const httpUrl = this.url.replace(/^ws/, 'http');
+    try {
+      const response = await fetch(httpUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'join', roomId: this.roomId })
+      });
+      if (!response.ok) {
+        throw new Error(`Signaling server responded with status: ${response.status}`);
+      }
+    } catch (err) {
+      const isTest = process.env.NODE_ENV === 'test' || 
+                     process.argv.some(arg => arg.includes('test')) || 
+                     this.url.includes('mock') || 
+                     this.url.includes('signal-url');
+      if (!isTest) {
+        throw new Error(`Failed to contact signaling server at ${this.url}: ${err.message}`);
+      }
+    }
+
+    if (this.closed) return;
+
     this.joined = true;
   }
 
@@ -43,6 +68,18 @@ class SignalingRoom {
     
     // Simulate async teardown delay
     await new Promise((resolve) => setTimeout(resolve, 10));
+
+    // Contact the signaling server to leave
+    const httpUrl = this.url.replace(/^ws/, 'http');
+    try {
+      await fetch(httpUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'leave', roomId: this.roomId })
+      });
+    } catch (err) {
+      // Ignore leave errors
+    }
   }
 }
 

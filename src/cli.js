@@ -216,6 +216,12 @@ function parseArgs(argv) {
     process.exit(1);
   }
 
+  if (args.mesh && !args['signal-url']) {
+    console.error('filedrop: error: --signal-url is required when using --mesh');
+    console.error("Run 'filedrop --help' for usage.");
+    process.exit(1);
+  }
+
   let token = null;
   if (args.token !== undefined) {
     if (args.token === '') {

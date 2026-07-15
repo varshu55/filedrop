@@ -10,9 +10,18 @@ const { SignalingRoom } = require('./signaling.js');
 
 test('pickTransport Policy Selection', async (t) => {
   
-  await t.test('Step 1: forceMesh selects mesh when mesh is true', async () => {
-    const result = await pickTransport({ mesh: true });
+  await t.test('Step 1: forceMesh selects mesh when mesh is true and signalUrl is present', async () => {
+    const result = await pickTransport({ mesh: true, signalUrl: 'ws://localhost' });
     assert.strictEqual(result, 'mesh');
+  });
+
+  await t.test('Step 1: forceMesh throws when signalUrl is missing', async () => {
+    await assert.rejects(
+      async () => {
+        await pickTransport({ mesh: true });
+      },
+      /Cannot force Mesh: signaling URL is required/
+    );
   });
 
   await t.test('Step 2: forceLan selects lan when mesh is false', async () => {
