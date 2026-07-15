@@ -13,6 +13,8 @@ const portManager = require('./port');
 const mdns = require('./mdns');
 const server = require('./server');
 const qr = require('./qr');
+const { SignalingRoom } = require('./signaling');
+const { pickTransport } = require('./transport');
 
 /**
  * Assumed module interfaces:
@@ -218,13 +220,15 @@ async function main() {
   });
 
   // 3. Server Started
-  lifecycle.on('server:started', (data) => {
+  lifecycle.on('server:started', async (data) => {
     keyHex = data.keyHex;
     url = `http://${ip}:${port}/${config.token ? `?t=${encodeURIComponent(config.token)}` : ''}#${keyHex}`;
 
     // Initialize mDNS module (non-blocking)
     mdnsName = config.name || filename.replace(/[^a-zA-Z0-9]/g, '').toLowerCase().substring(0, 15) + '-filedrop';
     const transferId = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2);
+    
+    // Kick off mDNS announce and signaling room join in parallel
     if (config.mdns) {
       lifecycle.emit('mdns:announce', {
         mdnsName: config.name,
@@ -234,6 +238,40 @@ async function main() {
         ip: ip,
         port: port,
         verbose: config.verbose
+      });
+    }
+
+    let signalingRoom = null;
+    if (config.signalUrl && config.mesh !== false) {
+      signalingRoom = new SignalingRoom(config.signalUrl, transferId);
+      if (config.verbose) {
+        console.log(`[filedrop:signaling] Joining signaling room in parallel: ${config.signalUrl} (room: ${transferId})`);
+      }
+      signalingRoom.join().catch(err => {
+        if (config.verbose) {
+          console.warn(`[filedrop:signaling] Failed to join signaling room: ${err.message}`);
+        }
+      });
+    }
+
+    const chosenTransport = await pickTransport({
+      mesh: config.mesh,
+      signalUrl: config.signalUrl,
+      mdns: mdns,
+      timeoutMs: 3000,
+      verbose: config.verbose
+    });
+
+    console.log(`[filedrop:transport] Transport selected: ${chosenTransport.toUpperCase()}`);
+
+    if (chosenTransport === 'lan' && signalingRoom) {
+      if (config.verbose) {
+        console.log('[filedrop:signaling] LAN selected. Tearing down signaling room cleanly...');
+      }
+      await signalingRoom.leave();
+    } else if (signalingRoom) {
+      lifecycle.on('shutdown', (cleanups) => {
+        cleanups.push(signalingRoom.leave());
       });
     }
 

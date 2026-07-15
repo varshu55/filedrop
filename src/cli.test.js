@@ -175,5 +175,45 @@ test('CLI Parser', async (t) => {
     assert.strictEqual(config2.maxConnections, 8);
 
   });
+
+  await t.test('Parses --mesh, --no-mesh, and --signal-url options', () => {
+    const filePath = createTempFile(1024, '.txt');
+    
+    // 1. With --mesh
+    const configMesh = parseArgs([
+      'node',
+      'filedrop',
+      filePath,
+      '--mesh'
+    ]);
+    assert.strictEqual(configMesh.mesh, true);
+
+    // 2. With --no-mesh
+    const configNoMesh = parseArgs([
+      'node',
+      'filedrop',
+      filePath,
+      '--no-mesh'
+    ]);
+    assert.strictEqual(configNoMesh.mesh, false);
+
+    // 3. Without specifying mesh
+    const configNoFlag = parseArgs([
+      'node',
+      'filedrop',
+      filePath
+    ]);
+    assert.strictEqual(configNoFlag.mesh, undefined);
+
+    // 4. With --signal-url
+    const configSignal = parseArgs([
+      'node',
+      'filedrop',
+      filePath,
+      '--signal-url',
+      'ws://my-signaling-server.local'
+    ]);
+    assert.strictEqual(configSignal.signalUrl, 'ws://my-signaling-server.local');
+  });
 });
 
