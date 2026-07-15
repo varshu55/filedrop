@@ -310,7 +310,18 @@ async function main() {
   if (roomCode) {
     const signalHost = config.signalHost || "https://signal.filedrop.local";
     console.log(
-      "\n" + qr.renderMeshQR(signalHost, roomCode, { color: config.color }),
+  // Render mesh room code box when --mesh is active  ← NEW
+  if (roomCode) {
+    const signalHost = config.signalHost || "https://signal.filedrop.local";
+    if (config.qr) {
+      console.log(
+        "\n" + qr.renderMeshQR(signalHost, roomCode, { color: config.color }),
+      );
+    } else {
+      console.log(`\nMesh signal: ${signalHost}`);
+    }
+    console.log(qr.renderMeshCodeBox(roomCode, { color: config.color }));
+  }
     );
     console.log(qr.renderMeshCodeBox(roomCode, { color: config.color }));
   }
