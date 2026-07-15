@@ -317,6 +317,10 @@ test('Server Core', async (t) => {
 
     await errorPromise;
     assert.strictEqual(errorCalled, true);
+
+    const retryRes = await httpClient(url, { agent: false });
+    assert.strictEqual(retryRes.statusCode, 200);
+
     req.destroy();
     await shutdown();
   });
