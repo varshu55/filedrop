@@ -2,7 +2,14 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const archiver = require('archiver');
+let ZipArchive = null;
+async function getZipArchive() {
+  if (!ZipArchive) {
+    const mod = await import('archiver');
+    ZipArchive = mod.ZipArchive;
+  }
+  return ZipArchive;
+}
 const mime = require('mime');
 const pkg = require('../package.json');
 const VERSION = pkg.version;
@@ -366,7 +373,7 @@ async function createServer({
 </body>
 </html>`;
 
-  const server = http.createServer((req, res) => {
+  const server = http.createServer(async (req, res) => {
     const { method } = req;
     let pathname = '/';
     try {
@@ -466,17 +473,12 @@ async function createServer({
       return;
     }
 
-    if (req.headers.range) {
-      res.writeHead(416, { 'Content-Type': 'text/plain' });
-      res.end('Range Not Satisfiable');
-      return;
-    }
-
     if (method === 'HEAD') {
       res.setHeader('Content-Type', contentType);
       res.setHeader('Content-Disposition', contentDisposition);
       res.setHeader('Cache-Control', 'no-store');
       res.setHeader('Connection', 'close');
+      res.setHeader('Accept-Ranges', 'none');
       res.setHeader('X-Filedrop-Version', version);
       res.setHeader('X-Transfer-ID', transferId);
       if (!isDirectory && !isClipboard && !isMultiFile) res.setHeader('Content-Length', fileStat.size + 28);
@@ -494,6 +496,7 @@ async function createServer({
     res.setHeader('Content-Disposition', contentDisposition);
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Connection', 'close');
+    res.setHeader('Accept-Ranges', 'none');
     res.setHeader('X-Filedrop-Version', version);
     res.setHeader('X-Transfer-ID', transferId);
     res.setHeader('Access-Control-Expose-Headers', 'Content-Length');
@@ -559,7 +562,8 @@ async function createServer({
       if (isClipboard) {
         sourceStream = require('stream').Readable.from([Buffer.from(clipboardData, 'utf8')]);
       } else if (isMultiFile) {
-        const archive = new archiver.ZipArchive({ zlib: { level: 5 } });
+        const ZipArchiveClass = await getZipArchive();
+        const archive = new ZipArchiveClass({ zlib: { level: 5 } });
         const addedNames = new Set();
         for (const file of filePaths) {
           let name = path.basename(file);
@@ -578,7 +582,8 @@ async function createServer({
         archive.finalize();
         sourceStream = archive;
       } else if (isDirectory) {
-        const archive = new archiver.ZipArchive({ zlib: { level: 5 } });
+        const ZipArchiveClass = await getZipArchive();
+        const archive = new ZipArchiveClass({ zlib: { level: 5 } });
         archive.directory(filePath, path.basename(filePath));
         archive.finalize();
         sourceStream = archive;
@@ -676,7 +681,7 @@ async function createServer({
 
   return new Promise((resolve, reject) => {
     server.once('error', reject);
-    server.listen(port, () => {
+    server.listen(port, '0.0.0.0', () => {
       server.removeListener('error', reject);
       // Expose keyHex here
       resolve({ server, shutdown, keyHex, downloadPath });
@@ -684,4 +689,60 @@ async function createServer({
   });
 }
 
-module.exports = { createServer };
+function bind(lifecycle) {
+  let activeShutdown = null;
+
+  lifecycle.on('server:start', async (params) => {
+    try {
+      const result = await module.exports.createServer({
+        ...params,
+        onTransferStart: (currentCount, limit) => {
+          lifecycle.emit('server:transfer-start', { currentCount, limit });
+          if (typeof params.onTransferStart === 'function') {
+            params.onTransferStart(currentCount, limit);
+          }
+        },
+        onTransferComplete: (completedCount, downloadLimit) => {
+          lifecycle.emit('server:transfer-complete', { completedCount, downloadLimit });
+          if (typeof params.onTransferComplete === 'function') {
+            params.onTransferComplete(completedCount, downloadLimit);
+          }
+        },
+        onTransferError: (err) => {
+          lifecycle.emit('server:transfer-error', err);
+          if (typeof params.onTransferError === 'function') {
+            params.onTransferError(err);
+          }
+        }
+      });
+
+      activeShutdown = result.shutdown;
+
+      lifecycle.emit('server:started', { keyHex: result.keyHex, downloadPath: result.downloadPath });
+    } catch (err) {
+      lifecycle.emit('server:error', err);
+    }
+  });
+
+  lifecycle.on('server:shutdown', async () => {
+    if (activeShutdown) {
+      try {
+        await activeShutdown();
+        activeShutdown = null;
+        lifecycle.emit('server:shutdown-complete');
+      } catch (err) {
+        lifecycle.emit('server:error', err);
+      }
+    } else {
+      lifecycle.emit('server:shutdown-complete');
+    }
+  });
+
+  lifecycle.on('shutdown', (cleanups) => {
+    if (activeShutdown) {
+      cleanups.push(activeShutdown());
+    }
+  });
+}
+
+module.exports = { createServer, bind };

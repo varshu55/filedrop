@@ -131,6 +131,7 @@ test('CLI Parser', async (t) => {
       process.exit = originalExit;
       console.error = originalError;
     }
+  });
 
   await t.test('Parses custom token, connection limit, and sensitive warning options', () => {
     const filePath = createTempFile(1024, '.txt');

@@ -330,7 +330,33 @@ async function deregister() {
   });
 }
 
+function bind(lifecycle) {
+  lifecycle.on('mdns:announce', async (config) => {
+    try {
+      const result = await module.exports.announce(config);
+      lifecycle.emit('mdns:announced', result);
+    } catch (err) {
+      lifecycle.emit('mdns:error', err);
+    }
+  });
+
+  lifecycle.on('mdns:deregister', async () => {
+    try {
+      await module.exports.deregister();
+      lifecycle.emit('mdns:deregistered');
+    } catch (err) {
+      lifecycle.emit('mdns:error', err);
+    }
+  });
+
+  lifecycle.on('shutdown', (cleanups) => {
+    cleanups.push(module.exports.deregister());
+  });
+}
+
 module.exports = {
   announce,
-  deregister
+  deregister,
+  teardown: deregister,
+  bind
 };

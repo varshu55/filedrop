@@ -99,10 +99,27 @@ async function getSpecificPort(port) {
   process.exit(3);
 }
 
+function bind(lifecycle) {
+  lifecycle.on('port:resolve', async (data) => {
+    try {
+      let resolvedPort;
+      if (data.port) {
+        resolvedPort = await module.exports.getSpecificPort(data.port);
+      } else {
+        resolvedPort = await module.exports.findAvailablePort(data.startPort ?? 8000, data.endPort ?? 8999);
+      }
+      lifecycle.emit('port:resolved', resolvedPort);
+    } catch (err) {
+      lifecycle.emit('port:error', err);
+    }
+  });
+}
+
 module.exports = {
   MIN_PORT,
   MAX_PORT,
   findAvailablePort,
   getSpecificPort,
   isPortAvailable,
+  bind,
 };
