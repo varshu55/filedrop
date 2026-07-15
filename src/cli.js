@@ -33,6 +33,8 @@ Options:
   --no-color             Force no-color output (also respects NO_COLOR env var)
   --version              Print version and exit
   --help, -h             Print help and exit
+  --mesh                 Enable mesh (cross-network) mode; shows a 6-char room code  
+  --signal-host <url>    Signaling server base URL (default: https://signal.filedrop.local)  
 
 filedrop v${VERSION} — https://github.com/<org>/filedrop`);
 }
@@ -47,6 +49,7 @@ function parseArgs(argv) {
       "qr",
       "mdns",
       "clipboard",
+      "mesh",
     ],
     string: [
       "port",
@@ -56,6 +59,7 @@ function parseArgs(argv) {
       "rate-limit-max",
       "name",
       "color",
+      "signal-host",
     ],
     alias: {
       p: "port",
@@ -215,6 +219,8 @@ function parseArgs(argv) {
     mdns: args.mdns,
     verbose: args.verbose,
     color: args.color,
+    mesh: args.mesh || false,
+    signalHost: args["signal-host"] || null,
   };
 }
 
