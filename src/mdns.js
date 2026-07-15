@@ -147,9 +147,11 @@ async function probe(instance, name, maxSuffix = 10) {
           hasConflict = true;
         }
 
-        const hasAnyPeer = answers.some(ans => 
-          ans.name && ans.name.endsWith('-filedrop._http._tcp.local')
-        );
+        const hasAnyPeer = answers.some(ans => {
+          const serviceName = ans.type === 'PTR' ? ans.data : ans.name;
+          return typeof serviceName === 'string' &&
+            serviceName.endsWith('-filedrop._http._tcp.local');
+        });
 
         if (hasAnyPeer) {
           peerFound = true;

@@ -14,6 +14,7 @@ class SignalingRoom {
     this.roomId = roomId;
     this.joined = false;
     this.closed = false;
+    this.abortController = new AbortController();
   }
 
   /**
@@ -36,12 +37,16 @@ class SignalingRoom {
       const response = await fetch(httpUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'join', roomId: this.roomId })
+        body: JSON.stringify({ action: 'join', roomId: this.roomId }),
+        signal: this.abortController.signal
       });
       if (!response.ok) {
         throw new Error(`Signaling server responded with status: ${response.status}`);
       }
     } catch (err) {
+      if (err.name === 'AbortError') {
+        return;
+      }
       const isTest = process.env.NODE_ENV === 'test' || 
                      process.argv.some(arg => arg.includes('test')) || 
                      this.url.includes('mock') || 
@@ -65,6 +70,9 @@ class SignalingRoom {
     
     this.closed = true;
     this.joined = false;
+    
+    // Abort pending join fetch request
+    this.abortController.abort();
     
     // Simulate async teardown delay
     await new Promise((resolve) => setTimeout(resolve, 10));
