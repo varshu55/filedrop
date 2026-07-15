@@ -241,7 +241,21 @@ function updateStatus(status, options = {}) {
  * @returns {string}
  */
 function renderMeshQR(signalHost, roomCode, options = {}) {
-  const meshUrl = `${signalHost}/r/${roomCode}`;
+function renderMeshQR(signalHost, roomCode, options = {}) {
+  let base;
+  try {
+    base = new URL(signalHost);
+  } catch {
+    throw new Error(`--signal-host must be an absolute HTTP(S) URL, got: ${signalHost}`);
+  }
+  if (base.protocol !== "http:" && base.protocol !== "https:") {
+    throw new Error(`--signal-host scheme must be http or https, got: ${base.protocol}`);
+  }
+  // Remove any trailing slashes so joining "/r/<code>" is always clean
+  base.pathname = base.pathname.replace(/\/+$/, "");
+  const meshUrl = `${base.origin}${base.pathname}/r/${roomCode}`;
+  return renderQR(meshUrl, options);
+}
   return renderQR(meshUrl, options);
 }
 
