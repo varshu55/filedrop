@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 
-const { parseArgs } = require("./cli");
-const path = require("path");
-const crypto = require("crypto");
-const clipboardy = require("clipboardy").default || require("clipboardy");
-const { generateRoomCode } = require("./room-code");
+const { parseArgs } = require('./cli');
+const path = require('path');
+const crypto = require('crypto');
+const clipboardy = require('clipboardy').default || require('clipboardy');
+const fs = require('fs');
+const { confirmSensitiveFile } = require('./security');
 
 // Assumed imports from other agents
 const network = require("./network");
@@ -15,228 +16,295 @@ const qr = require("./qr");
 
 /**
  * Assumed module interfaces:
- *
- * network.js:
- *   getInterface(bindIp: string): Promise<string>
- *
- * port.js:
- *   findAvailablePort(startPort: number, endPort: number): Promise<number>
- *
- * mdns.js:
- *   announce(options: { name: string, port: number, txt: object }): Promise<void>
- *   teardown(): Promise<void>
- *
- * server.js:
- *   createServer(options: { filePath: string, port: number, options: object, onTransferStart: () => void, onTransferComplete: () => void, onTransferError: (err: Error) => void }): { shutdown: () => Promise<void>, start: () => Promise<void> }
- *
- * qr.js:
- *   generateQR(url: string, mode: string): string
- *
- * ui.js:
- *   renderStart(metadata: object): void
- *   updateStatus(status: string): void
- *   renderSuccess(): void
+ * * network.js:
+ * getInterface(bindIp: string): Promise<string>
+ * * port.js:
+ * findAvailablePort(startPort: number, endPort: number): Promise<number>
+ * * mdns.js:
+ * announce(options: { name: string, port: number, txt: object }): Promise<void>
+ * teardown(): Promise<void>
+ * * server.js:
+ * createServer(options: { filePath: string, port: number, options: object, onTransferStart: () => void, onTransferComplete: () => void, onTransferError: (err: Error) => void }): { shutdown: () => Promise<void>, start: () => Promise<void> }
+ * * qr.js:
+ * generateQR(url: string, mode: string): string
+ * * ui.js:
+ * renderStart(metadata: object): void
+ * updateStatus(status: string): void
+ * renderSuccess(): void
  */
+
+const { LifecycleManager, STATES } = require('./lifecycle');
 
 async function main() {
   // 1. Parse and validate arguments
   const config = parseArgs(process.argv);
-  // Generate mesh room code if --mesh is active
-  const roomCode = config.mesh ? generateRoomCode() : null;
 
-  // 2. Resolve absolute file path
-  // Handled inside parseArgs, which returns an absolute config.filePath
+  // Check for sensitive files
+  if (config.warnSensitive && !config.isClipboard) {
+    const readline = require('readline');
 
-  // 3. Discover network interface -> IP
-  let ip;
-  try {
-    const iface = await network.getInterface({
-      bind: config.bind,
-      verbose: config.verbose,
-    });
-    ip = iface.info.address;
-  } catch (err) {
-    console.error(
-      `filedrop: error: ${err.message || "No network interface found"}`,
-    );
-    process.exit(2);
-  }
-
-  // 4. Find available port
-  let port;
-  try {
-    if (config.port) {
-      port = await portManager.findAvailablePort(config.port, config.port);
-    } else {
-      port = await portManager.findAvailablePort(8000, 8999);
+    async function confirmUnreadablePath(p) {
+      console.log(`\x1b[33mWarning: Could not read/inspect path: ${p}. Proceed anyway? [y/N]\x1b[0m`);
+      const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+      });
+      return new Promise((resolve) => {
+        rl.question('', (answer) => {
+          rl.close();
+          resolve(answer.toLowerCase() === 'y');
+        });
+      });
     }
-  } catch (err) {
-    console.error(`filedrop: error: ${err.message || "Port exhausted"}`);
-    process.exit(3);
-  }
 
-  // url and filename will be constructed after server creation
-  // so we can get the encryption key and attach it to the URL.
+    async function getFilesRecursively(dir) {
+      let results = [];
+      let list;
+      try {
+        list = fs.readdirSync(dir);
+      } catch (err) {
+        const confirmed = await confirmUnreadablePath(dir);
+        if (!confirmed) {
+          console.log('Transfer aborted by user.');
+          process.exit(1);
+        }
+        return [];
+      }
+      for (const file of list) {
+        const filePath = path.join(dir, file);
+        let stat;
+        try {
+          stat = fs.statSync(filePath);
+        } catch (err) {
+          const confirmed = await confirmUnreadablePath(filePath);
+          if (!confirmed) {
+            console.log('Transfer aborted by user.');
+            process.exit(1);
+          }
+          continue;
+        }
+        if (stat && stat.isDirectory()) {
+          const subFiles = await getFilesRecursively(filePath);
+          results = results.concat(subFiles);
+        } else {
+          results.push(filePath);
+        }
+      }
+      return results;
+    }
 
-  let clipboardData = null;
-  let filename;
+    let filesToCheck = [];
+    if (config.isMultiFile) {
+      filesToCheck = config.filePaths;
+    } else if (config.isDirectory) {
+      filesToCheck = [config.filePath].concat(await getFilesRecursively(config.filePath));
+    } else {
+      filesToCheck = [config.filePath];
+    }
 
-  if (config.isClipboard) {
-    try {
-      clipboardData = clipboardy.readSync();
-      if (!clipboardData) {
-        console.error("filedrop: error: Clipboard is empty");
+    for (const filePath of filesToCheck) {
+      const confirmed = await confirmSensitiveFile(filePath);
+      if (!confirmed) {
+        console.log('Transfer aborted by user.');
         process.exit(1);
       }
-      filename = "clipboard.txt";
-    } catch (err) {
-      console.error(
-        `filedrop: error: Failed to read clipboard: ${err.message}`,
-      );
-      process.exit(1);
     }
-  } else if (config.isMultiFile) {
-    filename = "filedrop-bundle.zip";
-  } else if (config.isDirectory) {
-    filename = path.basename(config.filePath) + ".zip";
-  } else {
-    filename = path.basename(config.filePath);
   }
+  
+  // Initialize Lifecycle Manager
+  const lifecycle = new LifecycleManager(config);
 
-  // 5. Initialize mDNS module (non-blocking)
-  let mdnsName =
-    config.name ||
-    filename
-      .replace(/[^a-zA-Z0-9]/g, "")
-      .toLowerCase()
-      .substring(0, 15) + "-filedrop";
-  const transferId = crypto.randomUUID
-    ? crypto.randomUUID()
-    : Math.random().toString(36).substring(2);
-  if (config.mdns) {
-    mdns
-      .announce({
+  // Bind core modules to the lifecycle event bus
+  network.bind(lifecycle);
+  portManager.bind(lifecycle);
+  mdns.bind(lifecycle);
+  server.bind(lifecycle);
+
+  // Orchestration state variables
+  let ip;
+  let port;
+  let filename;
+  let clipboardData = null;
+  let calculatedBoxWidth = 43;
+  let isTransferring = false;
+  let url;
+  let mdnsName;
+  let keyHex;
+
+  // Resolve Exit Promise (helps coordinate asynchronous tests)
+  const exitPromise = new Promise((resolve) => {
+    lifecycle.on('stateChange', ({ newState }) => {
+      if (newState === STATES.EXITED) {
+        resolve();
+      }
+    });
+  });
+
+  // 1. Network Discovery
+  lifecycle.on('network:resolved', (iface) => {
+    ip = iface.info.address;
+
+    if (config.isClipboard) {
+      try {
+        clipboardData = clipboardy.readSync();
+        if (!clipboardData) {
+          console.error('filedrop: error: Clipboard is empty');
+          lifecycle.exitCleanly(1);
+          return;
+        }
+        filename = 'clipboard.txt';
+      } catch (err) {
+        console.error(`filedrop: error: Failed to read clipboard: ${err.message}`);
+        lifecycle.exitCleanly(1);
+        return;
+      }
+    } else if (config.isMultiFile) {
+      filename = 'filedrop-bundle.zip';
+    } else if (config.isDirectory) {
+      filename = path.basename(config.filePath) + '.zip';
+    } else {
+      filename = path.basename(config.filePath);
+    }
+
+    // Trigger port discovery
+    lifecycle.emit('port:resolve', {
+      port: config.port,
+      startPort: 8000,
+      endPort: 8999
+    });
+  });
+
+  lifecycle.on('network:error', (err) => {
+    console.error(`filedrop: error: ${err.message || 'No network interface found'}`);
+    lifecycle.exitCleanly(2);
+  });
+
+  // 2. Port Discovery
+  lifecycle.on('port:resolved', async (resolvedPort) => {
+    port = resolvedPort;
+
+    const readline = require('readline').createInterface({ input: process.stdin, output: process.stdout });
+    const limit = await new Promise(resolve => {
+      readline.question('How many devices will download this file? [1]: ', ans => {
+        readline.close();
+        resolve(parseInt(ans, 10) || 1);
+      });
+    });
+
+    // Trigger HTTP server start
+    lifecycle.emit('server:start', {
+      filePath: config.filePath,
+      filePaths: config.filePaths,
+      isMultiFile: config.isMultiFile,
+      clipboardData,
+      isClipboard: config.isClipboard,
+      port: port,
+      isDirectory: config.isDirectory,
+      downloadLimit: limit,
+      options: {
+        timeout: config.timeout,
+        verbose: config.verbose,
+        rateLimitWindow: config.rateLimitWindow,
+        rateLimitMax: config.rateLimitMax,
+        token: config.token,
+        maxConnections: config.maxConnections
+      }
+    });
+  });
+
+  lifecycle.on('port:error', (err) => {
+    console.error(`filedrop: error: ${err.message || 'Port exhausted'}`);
+    lifecycle.exitCleanly(3);
+  });
+
+  // 3. Server Started
+  lifecycle.on('server:started', (data) => {
+    keyHex = data.keyHex;
+    url = `http://${ip}:${port}/${config.token ? `?t=${encodeURIComponent(config.token)}` : ''}#${keyHex}`;
+
+    // Initialize mDNS module (non-blocking)
+    mdnsName = config.name || filename.replace(/[^a-zA-Z0-9]/g, '').toLowerCase().substring(0, 15) + '-filedrop';
+    const transferId = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2);
+    if (config.mdns) {
+      lifecycle.emit('mdns:announce', {
         mdnsName: config.name,
         filename: filename,
         size: config.fileSize,
         transferId: transferId,
         ip: ip,
         port: port,
-        verbose: config.verbose,
-      })
-      .catch((err) => {
-        // fire and forget with error callback
-        if (config.verbose) {
-          console.error(`mDNS error: ${err.message}`);
+        verbose: config.verbose
+      });
+    }
+
+    // Render and print QR code + metadata box
+    if (config.qr) {
+      const qrString = qr.renderQR(url, { compact: config.qrCompact, noQr: false, color: config.color });
+      console.log(qrString);
+      if (!config.qrCompact) {
+        let sizeDisplay;
+        if (config.isClipboard) {
+          sizeDisplay = 'Clipboard Text';
+        } else {
+          sizeDisplay = config.isDirectory ? '(streaming zip)' : config.fileSize + ' bytes';
         }
-      });
-  }
-
-  // 6. Initialize HTTP server module
-  let transferCompleteResolve;
-  let transferErrorReject;
-  const transferPromise = new Promise((resolve, reject) => {
-    transferCompleteResolve = resolve;
-    transferErrorReject = reject;
-  });
-
-  let isTransferring = false;
-  let timeoutHandle;
-
-  const readline = require("readline").createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-  const limit = await new Promise((resolve) => {
-    readline.question(
-      "How many devices will download this file? [1]: ",
-      (ans) => {
-        readline.close();
-        resolve(parseInt(ans, 10) || 1);
-      },
-    );
-  });
-
-  const { shutdown: httpAppShutdown, keyHex } = await server.createServer({
-    filePath: config.filePath,
-    filePaths: config.filePaths,
-    isMultiFile: config.isMultiFile,
-    clipboardData,
-    isClipboard: config.isClipboard,
-    port: port,
-    isDirectory: config.isDirectory,
-    downloadLimit: limit,
-    options: {
-      timeout: config.timeout,
-      verbose: config.verbose,
-      rateLimitWindow: config.rateLimitWindow,
-      rateLimitMax: config.rateLimitMax,
-    },
-    onTransferStart: (currentCount, limit) => {
-      isTransferring = true;
-      clearTimeout(timeoutHandle); // reset/cancel connection timeout
-      if (limit > 1) {
-        qr.updateStatus(`transferring (${currentCount}/${limit})`, {
-          color: config.color,
-        });
-      } else {
-        qr.updateStatus("transferring", { color: config.color });
+        
+        const { output, boxWidth } = qr.renderMetadataBox(filename, sizeDisplay, url, config.mdns ? mdnsName : null, { color: config.color });
+        calculatedBoxWidth = boxWidth;
+        console.log(output);
       }
-    },
-    onTransferComplete: (completedCount, downloadLimit) => {
-      qr.updateStatus(`Downloads: ${completedCount} / ${downloadLimit}`, {
-        color: config.color,
-      });
-      if (completedCount >= downloadLimit) {
-        isTransferring = false;
-        transferCompleteResolve();
+    } else {
+      console.log(`URL: ${url}`);
+      if (config.mdns) {
+        console.log(`mDNS: http://${mdnsName}.local:${port}/${config.token ? `?t=${encodeURIComponent(config.token)}` : ''}#${keyHex}`);
       }
-    },
-    onTransferError: (err) => {
-      if (err.message && err.message.includes("ERR_CLIENT_DISCONNECTED")) {
-        // Disconnect frees the slot, server remains active
-      } else {
-        isTransferring = false;
-        transferErrorReject(err);
-      }
-    },
-  });
-
-  const url = `http://${ip}:${port}/#${keyHex}`;
-
-  // 7. Render and print QR code + metadata box
-  if (config.qr) {
-    const qrString = qr.renderQR(url, {
-      compact: config.qrCompact,
-      noQr: false,
-      color: config.color,
-    });
-    console.log(qrString);
-    if (!config.qrCompact) {
-      let sizeDisplay;
-      if (config.isClipboard) {
-        sizeDisplay = "Clipboard Text";
-      } else {
-        sizeDisplay = config.isDirectory
-          ? "(streaming zip)"
-          : config.fileSize + " bytes";
-      }
-      console.log(
-        qr.renderMetadataBox(
-          filename,
-          sizeDisplay,
-          url,
-          config.mdns ? mdnsName : null,
-          { color: config.color },
-        ),
-      );
     }
-  } else {
-    console.log(`URL: ${url}`);
-    if (config.mdns) {
-      console.log(`mDNS: http://${mdnsName}.local:${port}/#${keyHex}`);
+
+    // Transition lifecycle to READY then WAITING
+    lifecycle.transition(STATES.READY);
+    lifecycle.transition(STATES.WAITING);
+  });
+
+  lifecycle.on('server:error', (err) => {
+    console.error(`\nTransfer error: ${err.message}`);
+    lifecycle.exitCleanly(1);
+  });
+
+  // 4. Server Transfer Events
+  lifecycle.on('server:transfer-start', ({ currentCount, limit }) => {
+    isTransferring = true;
+    if (lifecycle.state === STATES.WAITING) {
+      lifecycle.transition(STATES.TRANSFERRING, { socket: null });
     }
-  }
+    if (limit > 1) {
+      qr.updateStatus(`transferring (${currentCount}/${limit})`, { color: config.color }, calculatedBoxWidth);
+    } else {
+      qr.updateStatus('transferring', { color: config.color }, calculatedBoxWidth);
+    }
+  });
+
+  lifecycle.on('server:transfer-complete', ({ completedCount, downloadLimit }) => {
+    qr.updateStatus(`Downloads: ${completedCount} / ${downloadLimit}`, { color: config.color }, calculatedBoxWidth);
+    if (completedCount >= downloadLimit) {
+      isTransferring = false;
+      qr.updateStatus('done', { color: config.color }, calculatedBoxWidth);
+      lifecycle.transition(STATES.COMPLETE, { bytesTransferred: config.fileSize });
+    }
+  });
+
+  lifecycle.on('server:transfer-error', (err) => {
+    isTransferring = false;
+    if (err.message && err.message.includes('ERR_CLIENT_DISCONNECTED')) {
+      // Disconnect frees the slot, server remains active
+    } else {
+      console.error(`\nTransfer error: ${err.message}`);
+      lifecycle.transition(STATES.FAILED, { error: err, exitCode: 1 });
+    }
+  });
+
+  lifecycle.on('timeout', () => {
+    console.error(`\nTransfer timed out after ${config.timeout} seconds.`);
+  });
 
   // Render mesh room code box when --mesh is active  ← NEW
   if (roomCode) {
@@ -251,97 +319,32 @@ async function main() {
   let isShuttingDown = false;
   const handleExit = async () => {
     if (isShuttingDown) return;
+    isShuttingDown = true;
 
     if (isTransferring) {
-      console.log("\nTransfer in progress — waiting for completion...");
-      // Wait up to 10 seconds before force-exiting
+      console.log('\nTransfer in progress — waiting for completion...');
+      // Wait for the configured grace period before force-exiting
       setTimeout(() => {
         process.stdout.write("\nForcing exit.\n");
         process.exit(130);
-      }, 10000);
+      }, config.shutdownGraceMs);
       return;
     }
 
-    isShuttingDown = true;
-    process.stdout.write("\n"); // Terminal may be mid-line
-    console.log("Interrupted. No file was transferred.");
-
-    // Call server.shutdown() and mdns.deregister() in parallel
-    const shutdownPromise = Promise.all([
-      httpAppShutdown ? httpAppShutdown().catch(() => {}) : Promise.resolve(),
-      config.mdns && mdns.teardown
-        ? mdns.teardown().catch(() => {})
-        : Promise.resolve(),
-    ]);
-
-    const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 2000));
-
-    // Wait for both (with a 2-second timeout)
-    await Promise.race([shutdownPromise, timeoutPromise]);
-    process.exit(130);
+    process.stdout.write('\n'); // Terminal may be mid-line
+    console.log('Interrupted. No file was transferred.');
+    
+    await lifecycle.exitCleanly(130);
   };
 
   process.on("SIGINT", handleExit);
   process.on("SIGTERM", handleExit);
 
-  // 9. Set connection timeout timer
-  if (config.timeout > 0) {
-    timeoutHandle = setTimeout(async () => {
-      console.error(`\nTransfer timed out after ${config.timeout} seconds.`);
-      if (config.mdns && mdns.teardown) {
-        await mdns.teardown().catch((err) => {
-          console.error(
-            `filedrop: error: mDNS teardown during timeout failed: ${err.message}`,
-          );
-        });
-      }
-      if (httpAppShutdown) {
-        await httpAppShutdown().catch((err) => {
-          console.error(
-            `filedrop: error: Failed to shut down HTTP server during timeout: ${err.message}`,
-          );
-        });
-      }
-      process.exit(5);
-    }, config.timeout * 1000);
-  }
+  // Start network discovery
+  lifecycle.emit('network:discover', { bind: config.bind, verbose: config.verbose });
 
-  try {
-    // 10. Await onTransferComplete or onTransferError
-    await transferPromise;
-    clearTimeout(timeoutHandle);
-
-    // 11. Update terminal status line
-    qr.updateStatus("done", { color: config.color });
-
-    // 12. Deregister mDNS
-    if (config.mdns && mdns.teardown) {
-      await mdns.teardown().catch(() => {});
-    }
-
-    // 13. Shutdown HTTP server
-    if (httpAppShutdown) {
-      await httpAppShutdown().catch(() => {});
-    }
-
-    // 14. Exit process with code 0
-    process.exit(0);
-  } catch (err) {
-    clearTimeout(timeoutHandle);
-    console.error(`\nTransfer error: ${err.message}`);
-
-    if (config.mdns && mdns.teardown) {
-      await mdns.teardown().catch(() => {});
-    }
-    if (httpAppShutdown) {
-      await httpAppShutdown().catch(() => {});
-    }
-
-    if (err.message && err.message.includes("ERR_CLIENT_DISCONNECTED")) {
-      process.exit(6);
-    }
-    process.exit(1);
-  }
+  // Block until exited
+  await exitPromise;
 }
 
 main().catch((err) => {

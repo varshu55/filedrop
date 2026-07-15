@@ -14,12 +14,19 @@ const os = require('os');
 const path = require('path');
 const mDNS = require('multicast-dns');
 
-let mdnsInstance = null;
-let currentRecords = [];
-let isRegistered = false;
-let activeServiceName = '';
-let activeHostName = '';
-let activeOnQuery = null;
+function createSession() {
+  return {
+    mdnsInstance: null,
+    currentRecords: [],
+    isRegistered: false,
+    activeServiceName: '',
+    activeHostName: '',
+    activeOnQuery: null,
+    activeAnnounce: null
+  };
+}
+
+let session = createSession();
 
 function generateBaseName(filename) {
   const ext = path.extname(filename);
@@ -74,36 +81,51 @@ function buildRecords(serviceName, hostName, ip, port, txtConfig) {
   ];
 }
 
-function makeOnQuery(verbose) {
+function makeOnQuery(sessionObj, verbose) {
   return (packet) => {
-    if (!mdnsInstance || currentRecords.length === 0) return;
+    if (!sessionObj.mdnsInstance || sessionObj.currentRecords.length === 0) return;
 
     const needsResponse = packet.questions && packet.questions.some(q => {
       return q.name === `_http._tcp.local` ||
-        q.name === `${activeServiceName}._http._tcp.local` ||
-        q.name === `${activeHostName}.local`;
+        q.name === `${sessionObj.activeServiceName}._http._tcp.local` ||
+        q.name === `${sessionObj.activeHostName}.local`;
     });
 
-    if (needsResponse) {
-      try {
-        mdnsInstance.respond({ answers: currentRecords }, (err) => {
-          if (err) {
-            console.warn(`[filedrop:mDNS] respond() error in onQuery: ${err.message}`);
+    if (!needsResponse) return;
 
-            if (verbose) {
-              console.debug(err);
-            }
+    try {
+      sessionObj.mdnsInstance.respond({ answers: sessionObj.currentRecords }, (err) => {
+        if (err) {
+          console.warn(`[filedrop:mDNS] respond() error in onQuery: ${err.message}`);
+          if (verbose) {
+            console.debug(err);
           }
-        });
-      } catch (e) {
-        console.warn(`[filedrop:mDNS] respond() threw in onQuery: ${e.message}`);
-
-        if (verbose) {
-          console.debug(e);
         }
+      });
+    } catch (e) {
+      console.warn(`[filedrop:mDNS] respond() threw in onQuery: ${e.message}`);
+      if (verbose) {
+        console.debug(e);
       }
     }
   };
+}
+
+function resetSession() {
+  session.mdnsInstance = null;
+  session.currentRecords = [];
+  session.isRegistered = false;
+  session.activeServiceName = '';
+  session.activeHostName = '';
+  session.activeOnQuery = null;
+}
+
+function abortActiveAnnounce() {
+  if (session.activeAnnounce && !session.activeAnnounce.settled) {
+    session.activeAnnounce.settled = true;
+    session.activeAnnounce.resolve({ name: '', mdnsAvailable: false });
+  }
+  session.activeAnnounce = null;
 }
 
 async function probe(instance, name, maxSuffix = 10) {
@@ -159,30 +181,51 @@ async function probe(instance, name, maxSuffix = 10) {
  * @returns {Promise<{ name: string, mdnsAvailable: boolean }>}
  */
 async function announce(config) {
-  return new Promise((resolve) => {
-    const isWin = os.platform() === 'win32';
+  if (session.mdnsInstance) {
+    abortActiveAnnounce();
+    await deregister();
+  }
 
+  return new Promise((resolve) => {
+    const announceHandle = { settled: false, resolve };
+    session.activeAnnounce = announceHandle;
+
+    const finish = (result) => {
+      if (announceHandle.settled) return;
+      announceHandle.settled = true;
+      if (session.activeAnnounce === announceHandle) {
+        session.activeAnnounce = null;
+      }
+      resolve(result);
+    };
+
+    const isWin = os.platform() === 'win32';
     let instance;
+
     try {
       instance = mDNS();
     } catch (e) {
       if (config.verbose || !isWin) {
         console.warn(`mDNS unavailable: ${e.message}. Use the QR code or URL directly.`);
       }
-      return resolve({ name: '', mdnsAvailable: false });
+      finish({ name: '', mdnsAvailable: false });
+      return;
     }
 
-    let resolved = false;
+    session.mdnsInstance = instance;
+
     let winTimeout = null;
 
     const handleError = (err) => {
-      if (resolved) return;
-      resolved = true;
+      if (announceHandle.settled) return;
       if (winTimeout) clearTimeout(winTimeout);
 
       if (instance) {
         try { instance.destroy(); } catch (e) { console.error("[mdns] Failed to destroy instance:", e); }
       }
+
+      resetSession();
+      finish({ name: '', mdnsAvailable: false });
 
       if (isWin) {
         if (config.verbose) {
@@ -191,8 +234,6 @@ async function announce(config) {
       } else {
         console.warn(`mDNS unavailable: ${err.message}. Use the QR code or URL directly.`);
       }
-
-      resolve({ name: '', mdnsAvailable: false });
     };
 
     instance.on('error', handleError);
@@ -207,35 +248,39 @@ async function announce(config) {
     baseServiceName = baseServiceName.replace(/\.local$/, '');
 
     probe(instance, baseServiceName).then(finalName => {
-      if (resolved) return;
+      if (announceHandle.settled || session.activeAnnounce !== announceHandle || session.mdnsInstance !== instance) {
+        finish({ name: '', mdnsAvailable: false });
+        return;
+      }
 
       const hostName = os.hostname().replace(/\.local$/, '').toLowerCase().replace(/[^a-z0-9-]/g, '') || 'filedrop';
-      currentRecords = buildRecords(finalName, hostName, config.ip, config.port, {
+      session.currentRecords = buildRecords(finalName, hostName, config.ip, config.port, {
         filename: config.filename,
         size: config.size,
         transferId: config.transferId
       });
 
-      activeServiceName = finalName;
-      activeHostName = hostName;
-      mdnsInstance = instance;
-
-      activeOnQuery = makeOnQuery(config.verbose);
-      instance.on('query', activeOnQuery);
+      session.activeServiceName = finalName;
+      session.activeHostName = hostName;
+      session.activeOnQuery = makeOnQuery(session, config.verbose);
+      session.mdnsInstance.on('query', session.activeOnQuery);
 
       try {
-        instance.respond({ answers: currentRecords }, (err) => {
-          if (resolved) return;
+        session.mdnsInstance.respond({ answers: session.currentRecords }, (err) => {
+          if (announceHandle.settled) return;
+          if (winTimeout) clearTimeout(winTimeout);
           if (err) {
             handleError(err);
             return;
           }
-          resolved = true;
-          if (winTimeout) clearTimeout(winTimeout);
-          isRegistered = true;
-          resolve({ name: finalName, mdnsAvailable: true });
+          session.isRegistered = true;
+          finish({ name: finalName, mdnsAvailable: true });
         });
       } catch (err) {
+        handleError(err);
+      }
+    }).catch((err) => {
+      if (!announceHandle.settled) {
         handleError(err);
       }
     });
@@ -243,35 +288,75 @@ async function announce(config) {
 }
 
 async function deregister() {
-  if (!mdnsInstance || !isRegistered) {
+  abortActiveAnnounce();
+
+  if (!session.mdnsInstance) {
     return Promise.resolve();
   }
 
   return new Promise((resolve) => {
-    const goodbyeRecords = currentRecords.map(r => ({ ...r, ttl: 0 }));
+    const goodbyeRecords = session.currentRecords.map(r => ({ ...r, ttl: 0 }));
 
     try {
-      mdnsInstance.respond({ answers: goodbyeRecords }, () => {
+      session.mdnsInstance.respond({ answers: goodbyeRecords }, () => {
         setTimeout(() => {
           try {
-            mdnsInstance.removeListener('query', activeOnQuery);
-            activeOnQuery = null;
-            mdnsInstance.destroy();
+            if (session.activeOnQuery) {
+              session.mdnsInstance.removeListener('query', session.activeOnQuery);
+              session.activeOnQuery = null;
+            }
+            session.mdnsInstance.destroy();
           } catch (e) { console.error("[mdns] Failed to remove listener or destroy instance:", e); }
-          mdnsInstance = null;
-          currentRecords = [];
-          isRegistered = false;
+          resetSession();
           resolve();
         }, 200);
       });
     } catch (e) {
       console.warn("[mdns] deregister: error sending goodbye records:", e);
+      try {
+        if (session.activeOnQuery && session.mdnsInstance) {
+          session.mdnsInstance.removeListener('query', session.activeOnQuery);
+          session.activeOnQuery = null;
+        }
+        if (session.mdnsInstance) {
+          session.mdnsInstance.destroy();
+        }
+      } catch (destroyError) {
+        console.error("[mdns] Failed to destroy instance during deregister error:", destroyError);
+      }
+      resetSession();
       resolve();
     }
   });
 }
 
+function bind(lifecycle) {
+  lifecycle.on('mdns:announce', async (config) => {
+    try {
+      const result = await module.exports.announce(config);
+      lifecycle.emit('mdns:announced', result);
+    } catch (err) {
+      lifecycle.emit('mdns:error', err);
+    }
+  });
+
+  lifecycle.on('mdns:deregister', async () => {
+    try {
+      await module.exports.deregister();
+      lifecycle.emit('mdns:deregistered');
+    } catch (err) {
+      lifecycle.emit('mdns:error', err);
+    }
+  });
+
+  lifecycle.on('shutdown', (cleanups) => {
+    cleanups.push(module.exports.deregister());
+  });
+}
+
 module.exports = {
   announce,
-  deregister
+  deregister,
+  teardown: deregister,
+  bind
 };

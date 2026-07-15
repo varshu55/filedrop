@@ -2,7 +2,32 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const archiver = require('archiver');
+let ZipArchive = null;
+async function getZipArchive() {
+  if (!ZipArchive) {
+    const mod = await import('archiver');
+    ZipArchive = mod.ZipArchive;
+  }
+  return ZipArchive;
+}
+const mime = require('mime');
+const pkg = require('../package.json');
+const VERSION = pkg.version;
+
+const {
+  DEFAULT_TIMEOUT_SECONDS,
+  DEFAULT_SHUTDOWN_TIMEOUT_MS,
+  DEFAULT_RATE_LIMIT_WINDOW_MS,
+  DEFAULT_RATE_LIMIT_MAX,
+  DEFAULT_MAX_CONNECTIONS
+} = require('./constants');
+
+const { validateToken, createConnectionLimiter } = require('./security');
+
+// Chunk size for converting Uint8Array to binary string.
+// A chunking strategy is necessary because String.fromCharCode.apply can throw a
+// "Maximum call stack size exceeded" error if the array is too large.
+const U8_TO_BINARY_CHUNK_SIZE = 10000;
 
 function escapeHtml(unsafe) {
     return unsafe
@@ -55,47 +80,66 @@ async function createServer({
     throw err;
   }
 
-  // Use application/octet-stream to force download
-  const contentType = 'application/octet-stream';
+  let contentType = 'application/octet-stream';
+  if (isClipboard) {
+    contentType = 'text/plain';
+  } else if (isMultiFile || isDirectory) {
+    contentType = 'application/zip';
+  } else if (filePath) {
+    contentType = mime.getType(filePath) || 'application/octet-stream';
+  }
   
   const encodedFileName = encodeURIComponent(fileName)
     .replace(/['()]/g, escape)
     .replace(/\*/g, '%2A');
   const contentDisposition = `attachment; filename="${fileName.replace(/"/g, '\\"')}"; filename*=UTF-8''${encodedFileName}`;
 
-  const version = options.version || '1.0.0';
-  const timeoutMs = options.timeout ? options.timeout * 1000 : 60000;
+  const version = options.version || VERSION;
+  const timeoutMs = (options.timeout != null ? options.timeout : DEFAULT_TIMEOUT_SECONDS) * 1000;
+  const maxConnections = options.maxConnections !== undefined ? options.maxConnections : DEFAULT_MAX_CONNECTIONS;
+  const connectionLimiter = maxConnections > 0 ? createConnectionLimiter(maxConnections) : null;
   
   const completedIPs = new Set();
+  // Keep active transfer IPs locked for a short settle period so a retry that arrives
+  // immediately after a disconnect or finish still hits the 429 guard instead of racing
+  // with socket-close cleanup.
   const activeIPs = new Set();
   const sockets = new Set();
+  const transferCleanupDelayMs = options.transferCleanupDelay ?? 50;
 
-  // Rate limiting: max 30 requests per 10 seconds per IP by default
-  const rateLimitWindow = options.rateLimitWindow ?? 10000;
-  const rateLimitMax = options.rateLimitMax ?? 30;
+  // Rate limiting: max requests per window per IP by default
+  const rateLimitWindow = options.rateLimitWindow ?? DEFAULT_RATE_LIMIT_WINDOW_MS;
+  const rateLimitMax = options.rateLimitMax ?? DEFAULT_RATE_LIMIT_MAX;
   const rateLimitRetryAfter = Math.ceil(rateLimitWindow / 1000);
-  const ipRequestCounts = new Map();
+  const ipRequestCounts = new Map(); // Maps IP -> Array of timestamps
 
   function checkRateLimit(ip) {
     const now = Date.now();
-    let record = ipRequestCounts.get(ip);
-    if (!record || (now - record.windowStart) > rateLimitWindow) {
-      record = { windowStart: now, count: 1 };
-      ipRequestCounts.set(ip, record);
-      return true; // allowed
-    }
-    record.count++;
-    if (record.count > rateLimitMax) {
+    let timestamps = ipRequestCounts.get(ip) || [];
+    
+    // Filter out timestamps outside the rolling window
+    timestamps = timestamps.filter(timestamp => (now - timestamp) <= rateLimitWindow);
+    
+    if (timestamps.length >= rateLimitMax) {
+      // Save the cleaned array back before blocking
+      ipRequestCounts.set(ip, timestamps);
       return false; // blocked
     }
+    
+    timestamps.push(now);
+    ipRequestCounts.set(ip, timestamps);
     return true; // allowed
   }
 
   const rateLimitCleanup = setInterval(() => {
     const now = Date.now();
-    for (const [ip, record] of ipRequestCounts) {
-      if ((now - record.windowStart) > rateLimitWindow * 2) {
+    for (const [ip, timestamps] of ipRequestCounts) {
+      // If the latest request in the array is ancient, clean up the whole IP
+      const validTimestamps = timestamps.filter(t => (now - t) <= rateLimitWindow);
+      if (validTimestamps.length === 0) {
         ipRequestCounts.delete(ip);
+      } else {
+        ipRequestCounts.set(ip, validTimestamps);
       }
     }
   }, rateLimitWindow * 2);
@@ -134,9 +178,10 @@ async function createServer({
   </div>
   <script src="/forge.min.js"></script>
   <script>
+    // Chunking is necessary to avoid "Maximum call stack size exceeded" errors from String.fromCharCode.apply
     function u8ToBinaryString(u8) {
       let res = '';
-      const chunk = 10000;
+      const chunk = ${U8_TO_BINARY_CHUNK_SIZE};
       for (let i = 0; i < u8.length; i += chunk) {
         res += String.fromCharCode.apply(null, u8.subarray(i, i + chunk));
       }
@@ -165,13 +210,11 @@ async function createServer({
         }
         
         setStatus("Fetching...");
-        const response = await fetch('${downloadPath}');
+        const response = await fetch('${downloadPath}' + window.location.search);
         if (!response.ok) {
           setStatus("Error: Link Expired");
           setClipText("Error: Link expired or already copied.");
-          if (${isClipboard}) {
-            window.close();
-          }
+          ${isClipboard ? 'window.close();' : ''}
           return;
         }
 
@@ -256,7 +299,7 @@ async function createServer({
         setPercent("100%");
         setProgressWidth("100%");
 
-        const blob = new Blob([decryptedBuffer], { type: "application/octet-stream" });
+        const blob = new Blob([decryptedBuffer], { type: ${JSON.stringify(contentType)} });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -323,17 +366,22 @@ async function createServer({
         setClipText("Error: Decryption failed or link expired.");
         if (statusEl) statusEl.style.color = "#FF453A";
         console.error(err);
-        if (${isClipboard}) {
-          window.close();
-        }
+        ${isClipboard ? 'window.close();' : ''}
       }
     })();
   </script>
 </body>
 </html>`;
 
-  const server = http.createServer((req, res) => {
-    const { method, url } = req;
+  const server = http.createServer(async (req, res) => {
+    const { method } = req;
+    let pathname = '/';
+    try {
+      const parsedUrl = new URL(req.url, 'http://localhost');
+      pathname = decodeURIComponent(parsedUrl.pathname);
+    } catch (err) {
+      // Fallback to raw url or root if decoding fails
+    }
 
     const clientIp = req.socket.remoteAddress;
     if (!checkRateLimit(clientIp)) {
@@ -341,8 +389,15 @@ async function createServer({
       res.end('Too Many Requests');
       return;
     }
+
+    // Token validation:
+    if (pathname !== '/forge.min.js' && !validateToken(req.url, options.token)) {
+      res.writeHead(403, { 'Content-Type': 'text/plain' });
+      res.end('Forbidden');
+      return;
+    }
     
-    if (url === '/forge.min.js') {
+    if (pathname === '/forge.min.js') {
       const forgePath = path.join(__dirname, '../node_modules/node-forge/dist/forge.min.js');
       const forgeStream = fs.createReadStream(forgePath);
       forgeStream.on('error', () => {
@@ -363,7 +418,7 @@ async function createServer({
     }
 
     // Serve the HTML Decryptor Interface
-    if (url === '/' || url === `/${encodeURI(fileName)}`) {
+    if (pathname === '/' || pathname === `/${fileName}`) {
       if (completedIPs.has(clientIp)) {
         res.writeHead(410, { 'Content-Type': 'text/plain' });
         res.end('This file has already been transferred.');
@@ -385,7 +440,7 @@ async function createServer({
     }
 
     // Reject unknown paths
-    if (url !== downloadPath) {
+    if (pathname !== downloadPath) {
       res.writeHead(404, { 'Content-Type': 'text/plain' });
       res.end('Not Found');
       return;
@@ -418,17 +473,12 @@ async function createServer({
       return;
     }
 
-    if (req.headers.range) {
-      res.writeHead(416, { 'Content-Type': 'text/plain' });
-      res.end('Range Not Satisfiable');
-      return;
-    }
-
     if (method === 'HEAD') {
-      res.setHeader('Content-Type', 'application/octet-stream');
+      res.setHeader('Content-Type', contentType);
       res.setHeader('Content-Disposition', contentDisposition);
       res.setHeader('Cache-Control', 'no-store');
       res.setHeader('Connection', 'close');
+      res.setHeader('Accept-Ranges', 'none');
       res.setHeader('X-Filedrop-Version', version);
       res.setHeader('X-Transfer-ID', transferId);
       if (!isDirectory && !isClipboard && !isMultiFile) res.setHeader('Content-Length', fileStat.size + 28);
@@ -442,43 +492,68 @@ async function createServer({
     }
     activeIPs.add(clientIp);
 
-    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Type', contentType);
     res.setHeader('Content-Disposition', contentDisposition);
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Connection', 'close');
+    res.setHeader('Accept-Ranges', 'none');
     res.setHeader('X-Filedrop-Version', version);
     res.setHeader('X-Transfer-ID', transferId);
     res.setHeader('Access-Control-Expose-Headers', 'Content-Length');
     if (!isDirectory && !isClipboard && !isMultiFile) res.setHeader('Content-Length', fileStat.size + 28);
 
     let responseFinished = false;
+    let transferState = 'pending';
+    let cleanupTimer = null;
     let transferConcluded = false;
 
-    const transferTimeout = setTimeout(() => {
-      if (!transferConcluded) {
+    const transferTimeout = timeoutMs > 0 ? setTimeout(() => {
+      if (transferState === 'pending') {
+        transferState = 'timed-out';
+        activeIPs.delete(clientIp);
         transferConcluded = true;
+        if (sourceStream) sourceStream.destroy();
         req.socket.destroy();
         onTransferError(new Error('ERR_TRANSFER_TIMEOUT'));
       }
-    }, timeoutMs);
+    }, timeoutMs) : null;
 
-    res.on('finish', () => {
-      responseFinished = true;
-    });
-
-    req.socket.on('close', () => {
-      if (transferConcluded) return;
+    const markTransferComplete = () => {
+      if (transferState === 'complete' || transferState === 'timed-out') return;
+      transferState = 'complete';
       transferConcluded = true;
-      clearTimeout(transferTimeout);
-      
-      if (responseFinished) {
-        activeIPs.delete(clientIp);
-        completedIPs.add(clientIp);
-        onTransferComplete(completedIPs.size, downloadLimit);
-      } else {
+      if (transferTimeout) clearTimeout(transferTimeout);
+      if (cleanupTimer) clearTimeout(cleanupTimer);
+      activeIPs.delete(clientIp);
+      completedIPs.add(clientIp);
+      onTransferComplete(completedIPs.size, downloadLimit);
+    };
+
+    const markTransferDisconnected = () => {
+      if (transferState === 'complete' || transferState === 'timed-out') return;
+      if (transferState === 'disconnect') return;
+      transferState = 'disconnect';
+      transferConcluded = true;
+      if (transferTimeout) clearTimeout(transferTimeout);
+      cleanupTimer = setTimeout(() => {
+        if (transferState !== 'disconnect') return;
+        transferState = 'disconnected';
         activeIPs.delete(clientIp);
         if (sourceStream) sourceStream.destroy();
         onTransferError(new Error('ERR_CLIENT_DISCONNECTED'));
+      }, transferCleanupDelayMs);
+    };
+
+    res.on('finish', () => {
+      responseFinished = true;
+      markTransferComplete();
+    });
+
+    req.socket.on('close', () => {
+      if (responseFinished || res.writableEnded || res.finished) {
+        markTransferComplete();
+      } else {
+        markTransferDisconnected();
       }
     });
 
@@ -487,7 +562,8 @@ async function createServer({
       if (isClipboard) {
         sourceStream = require('stream').Readable.from([Buffer.from(clipboardData, 'utf8')]);
       } else if (isMultiFile) {
-        const archive = new archiver.ZipArchive({ zlib: { level: 5 } });
+        const ZipArchiveClass = await getZipArchive();
+        const archive = new ZipArchiveClass({ zlib: { level: 5 } });
         const addedNames = new Set();
         for (const file of filePaths) {
           let name = path.basename(file);
@@ -506,7 +582,8 @@ async function createServer({
         archive.finalize();
         sourceStream = archive;
       } else if (isDirectory) {
-        const archive = new archiver.ZipArchive({ zlib: { level: 5 } });
+        const ZipArchiveClass = await getZipArchive();
+        const archive = new ZipArchiveClass({ zlib: { level: 5 } });
         archive.directory(filePath, path.basename(filePath));
         archive.finalize();
         sourceStream = archive;
@@ -559,9 +636,22 @@ async function createServer({
   });
 
   server.on('connection', (socket) => {
+    if (connectionLimiter) {
+      const allowed = connectionLimiter.handleConnection(socket, () => {
+        socket.end('HTTP/1.1 429 Too Many Requests\r\nConnection: close\r\nContent-Type: text/plain\r\n\r\nToo Many Requests\r\n');
+      });
+      if (!allowed) {
+        return;
+      }
+    }
     sockets.add(socket);
     socket.once('close', () => sockets.delete(socket));
   });
+
+  const configuredShutdownTimeoutMs = options.shutdownTimeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS;
+  const shutdownTimeoutMs = Number.isSafeInteger(configuredShutdownTimeoutMs) && configuredShutdownTimeoutMs > 0
+    ? configuredShutdownTimeoutMs
+    : DEFAULT_SHUTDOWN_TIMEOUT_MS;
 
   const shutdown = () => {
     clearInterval(rateLimitCleanup);
@@ -572,7 +662,7 @@ async function createServer({
         resolved = true;
         resolve();
       };
-      const forceTimeout = setTimeout(finish, 3000);
+      const forceTimeout = setTimeout(finish, shutdownTimeoutMs);
       
       if (typeof options.onShutdown === 'function') {
         try { options.onShutdown(); } catch (err) { }
@@ -591,7 +681,7 @@ async function createServer({
 
   return new Promise((resolve, reject) => {
     server.once('error', reject);
-    server.listen(port, () => {
+    server.listen(port, '0.0.0.0', () => {
       server.removeListener('error', reject);
       // Expose keyHex here
       resolve({ server, shutdown, keyHex, downloadPath });
@@ -599,4 +689,60 @@ async function createServer({
   });
 }
 
-module.exports = { createServer };
+function bind(lifecycle) {
+  let activeShutdown = null;
+
+  lifecycle.on('server:start', async (params) => {
+    try {
+      const result = await module.exports.createServer({
+        ...params,
+        onTransferStart: (currentCount, limit) => {
+          lifecycle.emit('server:transfer-start', { currentCount, limit });
+          if (typeof params.onTransferStart === 'function') {
+            params.onTransferStart(currentCount, limit);
+          }
+        },
+        onTransferComplete: (completedCount, downloadLimit) => {
+          lifecycle.emit('server:transfer-complete', { completedCount, downloadLimit });
+          if (typeof params.onTransferComplete === 'function') {
+            params.onTransferComplete(completedCount, downloadLimit);
+          }
+        },
+        onTransferError: (err) => {
+          lifecycle.emit('server:transfer-error', err);
+          if (typeof params.onTransferError === 'function') {
+            params.onTransferError(err);
+          }
+        }
+      });
+
+      activeShutdown = result.shutdown;
+
+      lifecycle.emit('server:started', { keyHex: result.keyHex, downloadPath: result.downloadPath });
+    } catch (err) {
+      lifecycle.emit('server:error', err);
+    }
+  });
+
+  lifecycle.on('server:shutdown', async () => {
+    if (activeShutdown) {
+      try {
+        await activeShutdown();
+        activeShutdown = null;
+        lifecycle.emit('server:shutdown-complete');
+      } catch (err) {
+        lifecycle.emit('server:error', err);
+      }
+    } else {
+      lifecycle.emit('server:shutdown-complete');
+    }
+  });
+
+  lifecycle.on('shutdown', (cleanups) => {
+    if (activeShutdown) {
+      cleanups.push(activeShutdown());
+    }
+  });
+}
+
+module.exports = { createServer, bind };

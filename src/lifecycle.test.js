@@ -51,7 +51,7 @@ test('Lifecycle Manager', async (t) => {
   });
   await t.test('Streams registered after exitStarted are destroyed immediately', async () => {
     const lm = new LifecycleManager();
-    lm.exitStarted = true; // simulate shutdown already begun
+    lm.exitStarted = true;
 
     let destroyed = false;
     const fakeStream = {
@@ -82,4 +82,48 @@ test('Lifecycle Manager', async (t) => {
     assert.strictEqual(lm.state, 'EXITED');
   });
 
+  await t.test('Failsafe exit uses default 1000ms when failsafeExitTimeout is not configured', async () => {
+    const lm = new LifecycleManager();
+    assert.strictEqual(lm.failsafeExitTimeout, 1000);
+  });
+
+  await t.test('Failsafe exit uses custom timeout when failsafeExitTimeout is configured', async () => {
+    const lm = new LifecycleManager({ failsafeExitTimeout: 500 });
+    assert.strictEqual(lm.failsafeExitTimeout, 500);
+  });
+
+  await t.test('Failsafe fires at configured interval using fake timers', async (t) => {
+    const exitCalls = [];
+    t.mock.method(process, 'exit', (code) => exitCalls.push(code));
+    t.mock.timers.enable(['setTimeout']);
+
+    const lm = new LifecycleManager({ failsafeExitTimeout: 500 });
+
+    // Arm the failsafe timer directly — same pattern as exitCleanly
+    setTimeout(() => process.exit(0), lm.failsafeExitTimeout).unref();
+
+    // Just before the threshold — should not have fired yet
+    t.mock.timers.tick(499);
+    assert.strictEqual(exitCalls.length, 0);
+
+    // Cross the threshold — should fire now
+    t.mock.timers.tick(1);
+    assert.strictEqual(exitCalls.length, 1);
+    assert.strictEqual(exitCalls[0], 0);
+  });
+
+  await t.test('Failsafe exit falls back to default for invalid values', async () => {
+    const invalid = [0, -500, 'abc', null, NaN];
+    for (const value of invalid) {
+      const lm = new LifecycleManager({ failsafeExitTimeout: value });
+      assert.strictEqual(lm.failsafeExitTimeout, 1000, `expected default for value: ${value}`);
+    }
+  });
+
+  await t.test('Failsafe exit coerces numeric strings', async () => {
+    const lm = new LifecycleManager({ failsafeExitTimeout: '2000' });
+    assert.strictEqual(lm.failsafeExitTimeout, 2000);
+  });
+
 });
+

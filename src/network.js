@@ -122,7 +122,7 @@ function getInterface(options = {}) {
             try {
                 // Try to resolve GUIDs to friendly names using wmic (only in verbose mode)
                 const wmicOutput = execSync('wmic nic get GUID,NetConnectionID /format:csv', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
-                const lines = wmicOutput.split('\\n');
+                const lines = wmicOutput.split(/\r?\n/);
                 const guidMap = {};
                 for (const line of lines) {
                     const parts = line.trim().split(',');
@@ -171,9 +171,21 @@ function getInterface(options = {}) {
     return selected;
 }
 
+function bind(lifecycle) {
+    lifecycle.on('network:discover', async (options) => {
+        try {
+            const iface = await module.exports.getInterface(options);
+            lifecycle.emit('network:resolved', iface);
+        } catch (err) {
+            lifecycle.emit('network:error', err);
+        }
+    });
+}
+
 module.exports = {
     getInterface,
     getFilterReason,
     scoreInterface,
-    isValidIPv4
+    isValidIPv4,
+    bind
 };

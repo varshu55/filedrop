@@ -1,7 +1,7 @@
 const qrcode = require("qrcode");
 
 const platform = require("./platform");
-
+const DEFAULT_BOX_WIDTH = 43;
 /**
  * Checks if the terminal supports color.
  */
@@ -128,15 +128,14 @@ function renderQR(url, options = {}) {
   return output.replace(/\n$/, ""); // Trim last newline
 }
 
-let lastBoxWidth = 43;
-
 /**
  * Renders the metadata box.
  * @param {string} filename
  * @param {string} sizeHuman
  * @param {string} url
  * @param {string} mdnsName
- * @returns {string} The formatted metadata box.
+ * @param {object} options
+ * @returns {{ output: string, boxWidth: number }} An object containing the formatted metadata box string and its inner width.
  */
 function renderMetadataBox(filename, sizeHuman, url, mdnsName, options = {}) {
   const { color = supportsColor() } = options;
@@ -146,8 +145,7 @@ function renderMetadataBox(filename, sizeHuman, url, mdnsName, options = {}) {
   const l3Len = mdnsName ? 6 + mdnsName.length + 6 : 0; // 6 for ".local"
   const l4Len = 6 + 25; // "Waiting for connection..."
 
-  const boxInnerWidth = Math.max(43, l1Len, l2Len, l3Len, l4Len);
-  lastBoxWidth = boxInnerWidth;
+  const boxInnerWidth = Math.max(DEFAULT_BOX_WIDTH, l1Len, l2Len, l3Len, l4Len);
 
   let output = "";
   if (color) {
@@ -197,14 +195,19 @@ function renderMetadataBox(filename, sizeHuman, url, mdnsName, options = {}) {
     output += `  +${"-".repeat(boxInnerWidth)}+\n`;
   }
 
-  return output;
+  return { output, boxWidth: boxInnerWidth };
 }
 
 /**
  * Updates the transfer status in the terminal.
- * @param {'transferring' | 'done'} status
+ * @param {string} status
+ * @param {object} options
+ * @param {number} [boxWidth=DEFAULT_BOX_WIDTH] - The explicit width of the box for padding calculation..
  */
 function updateStatus(status, options = {}) {
+  // Use the provided box width or the default.
+  const boxWidth = arguments[2] !== undefined ? arguments[2] : DEFAULT_BOX_WIDTH;
+
   if (!process.stdout.isTTY) return;
   const { color = supportsColor() } = options;
 
@@ -223,7 +226,7 @@ function updateStatus(status, options = {}) {
     msgLen = color ? 6 + msg.length : 10 + msg.length;
   }
 
-  const padding = Math.max(0, lastBoxWidth - msgLen);
+  const padding = Math.max(0, boxWidth - msgLen);
   const suffix = color ? ` │` : ` |`;
   const line = `${prefix}${msg}${" ".repeat(padding)}${suffix}`;
 
@@ -272,6 +275,4 @@ module.exports = {
   renderQR,
   renderMetadataBox,
   updateStatus,
-  renderMeshQR,
-  renderMeshCodeBox,
 };

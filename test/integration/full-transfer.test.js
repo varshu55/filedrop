@@ -21,24 +21,49 @@ test('Full transfer integration', async (t) => {
     }
 
     const filePath = createTempFile(1024);
-    const cliPath = path.join(__dirname, '../../src/cli.js');
+    const cliPath = path.join(__dirname, '../../bin/filedrop.js');
 
     const filedropProcess = spawn(process.execPath, [cliPath, filePath, '--port', '8123', '--no-mdns']);
+    
+    // Satisfy the pre-existing device limit prompt
+    filedropProcess.stdin.write('\n');
     
     let output = '';
     filedropProcess.stdout.on('data', data => output += data.toString());
     filedropProcess.stderr.on('data', data => output += data.toString());
 
     // wait for server to start
-    await new Promise(r => setTimeout(r, 1000));
+    await new Promise(r => setTimeout(r, 2000));
 
     const res = await httpClient('http://127.0.0.1:8123/');
     assert.strictEqual(res.statusCode, 200);
-    assert.strictEqual(res.body.length, 1024);
+
+    const downloadPathMatch = res.body.toString().match(/fetch\('([^']+)'/);
+    assert.ok(downloadPathMatch, 'Should find download path in HTML');
+    const downloadPath = downloadPathMatch[1];
+
+    const keyHexMatch = output.match(/#([0-9a-fA-F]+)/);
+    assert.ok(keyHexMatch, 'Should find decryption key in output');
+    const keyHex = keyHexMatch[1];
+
+    const downloadRes = await httpClient(`http://127.0.0.1:8123${downloadPath}`);
+    assert.strictEqual(downloadRes.statusCode, 200);
+
+    // Decrypt the response body to verify correctness
+    const crypto = require('crypto');
+    const key = Buffer.from(keyHex, 'hex');
+    const encrypted = downloadRes.body;
+    const iv = encrypted.subarray(0, 12);
+    const ciphertext = encrypted.subarray(12, encrypted.length - 16);
+    const tag = encrypted.subarray(encrypted.length - 16);
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+    decipher.setAuthTag(tag);
+    const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+    assert.strictEqual(decrypted.length, 1024);
 
     // wait for process to exit
     const code = await new Promise(resolve => filedropProcess.on('exit', resolve));
     assert.strictEqual(code, 0, 'Process should exit with code 0 after successful transfer');
-    assert.ok(output.includes('http://127.0.0.1:8123/'), 'QR output or URL should be printed');
+    assert.ok(output.includes(':8123/'), 'QR output or URL should be printed');
   });
 });

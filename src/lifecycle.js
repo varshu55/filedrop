@@ -26,10 +26,14 @@ class LifecycleManager extends EventEmitter {
   constructor(config = {}) {
     super();
     this.state = STATES.INITIALIZING;
-    this.connectionTimeoutSeconds = config.timeout || 300;
+    this.connectionTimeoutSeconds = typeof config.timeout === 'number' ? config.timeout : 300;
     this.transferTimeoutSeconds = 60; // Hardcoded 60s limit for transfer after connection
     this.stdoutFlushTimeout = config.stdoutFlushTimeout ?? 500;
-    
+    const failsafeInput = Number(config.failsafeExitTimeout);
+    this.failsafeExitTimeout = Number.isFinite(failsafeInput) && failsafeInput > 0
+      ? failsafeInput
+      : 1000;
+
     this.connectionTimer = null;
     this.transferTimer = null;
     
@@ -46,8 +50,6 @@ class LifecycleManager extends EventEmitter {
 
   registerFileStream(stream) {
     if (this.exitStarted) {
-      // Shutdown already in progress — don't track it, just destroy it
-      // immediately so it can't leak past cleanup.
       if (stream && typeof stream.destroy === 'function') {
         stream.destroy();
       }
@@ -126,9 +128,11 @@ class LifecycleManager extends EventEmitter {
 
   _startConnectionTimeout() {
     this._cancelConnectionTimeout();
-    this.connectionTimer = setTimeout(() => {
-      this.transition(STATES.TIMEOUT);
-    }, this.connectionTimeoutSeconds * 1000);
+    if (this.connectionTimeoutSeconds > 0) {
+      this.connectionTimer = setTimeout(() => {
+        this.transition(STATES.TIMEOUT);
+      }, this.connectionTimeoutSeconds * 1000);
+    }
   }
 
   _cancelConnectionTimeout() {
@@ -163,7 +167,7 @@ class LifecycleManager extends EventEmitter {
     this.exitStarted = true;
 
     // Failsafe exit in case teardown hangs
-    setTimeout(() => process.exit(exitCode), 1000).unref();
+    setTimeout(() => process.exit(exitCode), this.failsafeExitTimeout).unref();
 
     // 1. Cancel all active timers
     this._cancelConnectionTimeout();
@@ -173,31 +177,50 @@ class LifecycleManager extends EventEmitter {
     process.removeAllListeners('SIGINT');
     process.removeAllListeners('SIGTERM');
 
-    // 3. Call mdns.deregister() — await with 2s timeout
+    // 3. Emit 'shutdown' event allowing modules to add their cleanup promises
+    const cleanups = [];
+    this.emit('shutdown', cleanups);
+
+    // Wrap each event-driven cleanup with a 3s timeout
+    const eventCleanupPromises = cleanups.map(p =>
+      this._withTimeout(p, 3000).catch(err => {
+        this.emit('shutdown-error', {
+          phase: 'event-cleanup',
+          error: err
+        });
+      })
+    );
+
+    // 4. Backwards compatibility with direct calls
+    const legacyCleanups = [];
     if (this.mdns && typeof this.mdns.deregister === 'function') {
-      try {
-        await this._withTimeout(this.mdns.deregister(), 2000);
-      } catch (err) {
-         this.emit('shutdown-error', {
-      phase: 'mdns.deregister',
-      error: err
-    });
-      }
+      legacyCleanups.push(
+        this._withTimeout(this.mdns.deregister(), 2000).catch(err => {
+          this.emit('shutdown-error', {
+            phase: 'mdns.deregister',
+            error: err
+          });
+        })
+      );
     }
 
-    // 4. Call server.shutdown() — await with 3s timeout
     if (this.server && typeof this.server.shutdown === 'function') {
-      try {
-        await this._withTimeout(this.server.shutdown(), 3000);
-      } catch (err) {
-         this.emit('shutdown-error', {
-      phase: 'server.shutdown',
-      error: err
-    });
-      }
+      legacyCleanups.push(
+        this._withTimeout(this.server.shutdown(), 3000).catch(err => {
+          this.emit('shutdown-error', {
+            phase: 'server.shutdown',
+            error: err
+          });
+        })
+      );
     }
 
-    // Close any tracked file streams.
+    // Await all cleanups
+    const allCleanups = eventCleanupPromises.concat(legacyCleanups);
+    if (allCleanups.length > 0) {
+      await Promise.all(allCleanups);
+    }
+
     // Snapshot the Set first — destroy() can trigger the 'close' handler
     // synchronously/early in some stream implementations, which deletes
     // from this.fileStreams. Iterating a live Set while it's being mutated
@@ -216,7 +239,7 @@ class LifecycleManager extends EventEmitter {
       this.emit('stateChange', { oldState, newState: STATES.EXITED });
     }
 
-    // 5. Flush stdout (use process.stdout.end only if needed, test carefully)
+    // 5. Flush stdout
     if (process.stdout && !process.stdout.destroyed) {
       try {
         await new Promise((resolve) => {
@@ -237,7 +260,7 @@ class LifecycleManager extends EventEmitter {
           setTimeout(done, this.stdoutFlushTimeout);
         });
       } catch (e) {
-         console.error('Failed to flush stdout:', e);
+        console.error('Failed to flush stdout:', e);
       }
     }
 

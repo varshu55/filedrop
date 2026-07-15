@@ -1,12 +1,7 @@
 const { createServer } = require('./src/server.js');
 const fs = require('fs');
 const http = require('http');
-
-function createTempFile(size, ext) {
-  const p = require('path').join(__dirname, 'temp' + ext);
-  fs.writeFileSync(p, 'a'.repeat(size));
-  return p;
-}
+const { createTempFile, cleanupTempFiles } = require('./test/helpers/create-temp-file.js');
 
 function httpClient(url, options = {}) {
   return new Promise((resolve, reject) => {
@@ -47,6 +42,7 @@ async function run() {
   await new Promise(r => setTimeout(r, 50));
   
   await shutdown();
+  cleanupTempFiles();
 }
 
 run().catch(console.error);
