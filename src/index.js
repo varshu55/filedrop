@@ -307,7 +307,9 @@ async function main() {
   });
 
   // Render mesh room code box when --mesh is active
-  if (roomCode) {
+  if (config.mesh) {
+    const { generateRoomCode } = require("./room-code");
+    const roomCode = generateRoomCode();
     const signalHost = config.signalHost || "https://signal.filedrop.local";
     if (config.qr) {
       console.log(
