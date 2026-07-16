@@ -306,11 +306,7 @@ async function main() {
     console.error(`\nTransfer timed out after ${config.timeout} seconds.`);
   });
 
-  // Render mesh room code box when --mesh is active  ← NEW
-  if (roomCode) {
-    const signalHost = config.signalHost || "https://signal.filedrop.local";
-    console.log(
-  // Render mesh room code box when --mesh is active  ← NEW
+  // Render mesh room code box when --mesh is active
   if (roomCode) {
     const signalHost = config.signalHost || "https://signal.filedrop.local";
     if (config.qr) {
@@ -320,9 +316,6 @@ async function main() {
     } else {
       console.log(`\nMesh signal: ${signalHost}`);
     }
-    console.log(qr.renderMeshCodeBox(roomCode, { color: config.color }));
-  }
-    );
     console.log(qr.renderMeshCodeBox(roomCode, { color: config.color }));
   }
 
