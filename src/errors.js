@@ -62,13 +62,19 @@ const ERROR_CODES = {
   ERR_INVALID_IP: 'ERR_INVALID_IP'
 };
 
+function restoreTerminalState() {
+  if (process.stdout.isTTY) {
+    process.stdout.write('\x1b[?25h\x1b[0m\n');
+  }
+}
+
 /**
  * Registers global process error handlers.
  * To be called early in the lifecycle.
  */
 function registerGlobalErrorHandlers() {
   process.on('uncaughtException', (err) => {
-    // Clear any in-progress terminal state (restore cursor, etc.)
+    restoreTerminalState();
     console.error(`\nfiledrop: unexpected error: ${err.message}`);
     if (process.env.FILEDROP_DEBUG) {
       console.error(err.stack);
@@ -77,6 +83,7 @@ function registerGlobalErrorHandlers() {
   });
 
   process.on('unhandledRejection', (reason) => {
+    restoreTerminalState();
     console.error(`\nfiledrop: unhandled async error: ${reason}`);
     if (process.env.FILEDROP_DEBUG) {
       console.error(reason?.stack || reason);
