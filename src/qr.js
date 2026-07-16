@@ -284,6 +284,8 @@ function renderMeshCodeBox(roomCode, options = {}) {
 
 module.exports = {
   renderQR,
+  renderMeshQR,
+  renderMeshCodeBox,
   renderMetadataBox,
   updateStatus,
 };
