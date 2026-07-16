@@ -510,7 +510,9 @@ async function createServer({
     const transferTimeout = timeoutMs > 0 ? setTimeout(() => {
       if (transferState === 'pending') {
         transferState = 'timed-out';
+        activeIPs.delete(clientIp);
         transferConcluded = true;
+        if (sourceStream) sourceStream.destroy();
         req.socket.destroy();
         onTransferError(new Error('ERR_TRANSFER_TIMEOUT'));
       }
