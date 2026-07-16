@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const pkg = require('../package.json');
+const pkg = require("../package.json");
 const VERSION = pkg.version;
 const repositoryUrl =
   typeof pkg.repository === 'string'
@@ -57,6 +57,8 @@ Options:
   --no-color             Force no-color output (also respects NO_COLOR env var)
   --version              Print version and exit
   --help, -h             Print help and exit
+  --mesh                 Enable mesh (cross-network) mode; shows a 6-char room code  
+  --signal-host <url>    Signaling server base URL (default: https://signal.filedrop.local)  
 
 filedrop v${VERSION} — ${REPOSITORY_URL}`);
 }
@@ -66,12 +68,12 @@ function parseArgs(argv) {
     boolean: ['qr-compact', 'verbose', 'version', 'help', 'qr', 'mdns', 'clipboard', 'warn-sensitive'],
     string: ['port', 'bind', 'timeout', 'rate-limit-window', 'rate-limit-max', 'name', 'color', 'shutdown-grace-ms', 'token', 'max-connections'],
     alias: {
-      p: 'port',
-      b: 'bind',
-      t: 'timeout',
-      n: 'name',
-      v: 'verbose',
-      h: 'help'
+      p: "port",
+      b: "bind",
+      t: "timeout",
+      n: "name",
+      v: "verbose",
+      h: "help",
     },
     default: {
       qr: true,
@@ -104,18 +106,24 @@ function parseArgs(argv) {
 
   if (args.clipboard) {
     if (args._.length !== 0) {
-      console.error('filedrop: error: Cannot provide a file path when sharing clipboard');
+      console.error(
+        "filedrop: error: Cannot provide a file path when sharing clipboard",
+      );
       console.error("Run 'filedrop --help' for usage.");
       process.exit(1);
     }
   } else {
     if (args._.length === 0) {
-      console.error('filedrop: error: at least one file or directory must be provided (or use --clipboard)');
+      console.error(
+        "filedrop: error: at least one file or directory must be provided (or use --clipboard)",
+      );
       console.error("Run 'filedrop --help' for usage.");
       process.exit(1);
     }
 
-    filePaths = args._.map(p => path.resolve(p));
+    filePaths = args._.map((p) => path.resolve(p));
+
+    const statCache = new Map();
 
     for (const p of filePaths) {
       if (!fs.existsSync(p)) {
@@ -125,6 +133,7 @@ function parseArgs(argv) {
       }
 
       const stat = fs.statSync(p);
+      statCache.set(p, stat);
       if (!stat.isFile() && !stat.isDirectory()) {
         console.error(`filedrop: error: Path is not a file or directory: ${p}`);
         console.error("Run 'filedrop --help' for usage.");
@@ -142,8 +151,9 @@ function parseArgs(argv) {
 
     filePath = filePaths[0];
     isMultiFile = filePaths.length > 1;
-    isDirectory = isMultiFile || fs.statSync(filePath).isDirectory();
-    fileSize = isDirectory ? null : fs.statSync(filePath).size;
+    const firstStat = statCache.get(filePath);
+    isDirectory = isMultiFile || firstStat.isDirectory();
+    fileSize = isDirectory ? null : firstStat.size;
   }
 
   let port = null;
@@ -159,13 +169,15 @@ function parseArgs(argv) {
   if (args.bind) {
     const ipv4Regex = /^(\d{1,3}\.){3}\d{1,3}$/;
     if (!ipv4Regex.test(args.bind)) {
-      console.error('filedrop: error: --bind must be a valid IPv4 address');
+      console.error("filedrop: error: --bind must be a valid IPv4 address");
       console.error("Run 'filedrop --help' for usage.");
       process.exit(1);
     }
-    const octets = args.bind.split('.');
-    if (octets.some(o => parseInt(o, 10) > 255)) {
-      console.error('filedrop: error: --bind must be a valid IPv4 address (octets <= 255)');
+    const octets = args.bind.split(".");
+    if (octets.some((o) => parseInt(o, 10) > 255)) {
+      console.error(
+        "filedrop: error: --bind must be a valid IPv4 address (octets <= 255)",
+      );
       console.error("Run 'filedrop --help' for usage.");
       process.exit(1);
     }
@@ -173,7 +185,7 @@ function parseArgs(argv) {
 
   let timeout = parseInt(args.timeout, 10);
   if (isNaN(timeout) || timeout <= 0) {
-    console.error('filedrop: error: --timeout must be a positive integer');
+    console.error("filedrop: error: --timeout must be a positive integer");
     console.error("Run 'filedrop --help' for usage.");
     process.exit(1);
   }
@@ -195,14 +207,18 @@ function parseArgs(argv) {
 
   const rateLimitWindow = parseInt(args['rate-limit-window'], 10);
   if (isNaN(rateLimitWindow) || rateLimitWindow <= 0) {
-    console.error('filedrop: error: --rate-limit-window must be a positive integer');
+    console.error(
+      "filedrop: error: --rate-limit-window must be a positive integer",
+    );
     console.error("Run 'filedrop --help' for usage.");
     process.exit(1);
   }
 
-  const rateLimitMax = parseInt(args['rate-limit-max'], 10);
+  const rateLimitMax = parseInt(args["rate-limit-max"], 10);
   if (isNaN(rateLimitMax) || rateLimitMax <= 0) {
-    console.error('filedrop: error: --rate-limit-max must be a positive integer');
+    console.error(
+      "filedrop: error: --rate-limit-max must be a positive integer",
+    );
     console.error("Run 'filedrop --help' for usage.");
     process.exit(1);
   }
@@ -241,10 +257,12 @@ function parseArgs(argv) {
     warnSensitive: args['warn-sensitive'],
     name: args.name,
     qr: args.qr,
-    qrCompact: args['qr-compact'],
+    qrCompact: args["qr-compact"],
     mdns: args.mdns,
     verbose: args.verbose,
-    color: args.color
+    color: args.color,
+    mesh: args.mesh || false,
+    signalHost: args["signal-host"] || null,
   };
 }
 

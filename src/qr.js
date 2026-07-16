@@ -233,9 +233,59 @@ function updateStatus(status, options = {}) {
   // Go up 2 lines, write, go down 2 lines
   process.stdout.write(`\x1b[2A\r${line}\x1b[2B\r`);
 }
+/**
+ * Renders a QR code pointing at the mesh signal URL.
+ * @param {string} signalHost - e.g. "https://signal.example.com"
+ * @param {string} roomCode   - 6-char room code
+ * @param {object} options
+ * @returns {string}
+ */
+function renderMeshQR(signalHost, roomCode, options = {}) {
+  let base;
+  try {
+    base = new URL(signalHost);
+  } catch {
+    throw new Error(`--signal-host must be an absolute HTTP(S) URL, got: ${signalHost}`);
+  }
+  if (base.protocol !== "http:" && base.protocol !== "https:") {
+    throw new Error(`--signal-host scheme must be http or https, got: ${base.protocol}`);
+  }
+  // Remove any trailing slashes so joining "/r/<code>" is always clean
+  base.pathname = base.pathname.replace(/\/+$/, "");
+  const meshUrl = `${base.origin}${base.pathname}/r/${roomCode}`;
+  return renderQR(meshUrl, options);
+}
+
+/**
+ * Renders a high-contrast terminal box showing the mesh room code.
+ * @param {string} roomCode
+ * @param {object} options
+ * @returns {string}
+ */
+function renderMeshCodeBox(roomCode, options = {}) {
+  const { color = supportsColor() } = options;
+  const inner = `  mesh:  ${roomCode}  `;
+  const width = inner.length;
+
+  if (color) {
+    return [
+      `  ┌${"─".repeat(width)}┐`,
+      `  │\x1b[1m${inner}\x1b[0m│`,
+      `  └${"─".repeat(width)}┘`,
+    ].join("\n");
+  } else {
+    return [
+      `  +${"-".repeat(width)}+`,
+      `  |${inner}|`,
+      `  +${"-".repeat(width)}+`,
+    ].join("\n");
+  }
+}
 
 module.exports = {
   renderQR,
+  renderMeshQR,
+  renderMeshCodeBox,
   renderMetadataBox,
   updateStatus,
 };

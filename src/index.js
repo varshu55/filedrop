@@ -8,11 +8,11 @@ const fs = require('fs');
 const { confirmSensitiveFile } = require('./security');
 
 // Assumed imports from other agents
-const network = require('./network');
-const portManager = require('./port');
-const mdns = require('./mdns');
-const server = require('./server');
-const qr = require('./qr');
+const network = require("./network");
+const portManager = require("./port");
+const mdns = require("./mdns");
+const server = require("./server");
+const qr = require("./qr");
 
 /**
  * Assumed module interfaces:
@@ -306,6 +306,21 @@ async function main() {
     console.error(`\nTransfer timed out after ${config.timeout} seconds.`);
   });
 
+  // Render mesh room code box when --mesh is active
+  if (config.mesh) {
+    const { generateRoomCode } = require("./room-code");
+    const roomCode = generateRoomCode();
+    const signalHost = config.signalHost || "https://signal.filedrop.local";
+    if (config.qr) {
+      console.log(
+        "\n" + qr.renderMeshQR(signalHost, roomCode, { color: config.color }),
+      );
+    } else {
+      console.log(`\nMesh signal: ${signalHost}`);
+    }
+    console.log(qr.renderMeshCodeBox(roomCode, { color: config.color }));
+  }
+
   // Signal Handling
   let isShuttingDown = false;
   const handleExit = async () => {
@@ -316,7 +331,7 @@ async function main() {
       console.log('\nTransfer in progress — waiting for completion...');
       // Wait for the configured grace period before force-exiting
       setTimeout(() => {
-        process.stdout.write('\nForcing exit.\n');
+        process.stdout.write("\nForcing exit.\n");
         process.exit(130);
       }, config.shutdownGraceMs);
       return;
@@ -327,9 +342,9 @@ async function main() {
     
     await lifecycle.exitCleanly(130);
   };
-  
-  process.on('SIGINT', handleExit);
-  process.on('SIGTERM', handleExit);
+
+  process.on("SIGINT", handleExit);
+  process.on("SIGTERM", handleExit);
 
   // Start network discovery
   lifecycle.emit('network:discover', { bind: config.bind, verbose: config.verbose });
@@ -338,7 +353,7 @@ async function main() {
   await exitPromise;
 }
 
-main().catch(err => {
+main().catch((err) => {
   console.error(`Unhandled error: ${err.message}`);
   process.exit(1);
 });
