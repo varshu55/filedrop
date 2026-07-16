@@ -241,7 +241,6 @@ function updateStatus(status, options = {}) {
  * @returns {string}
  */
 function renderMeshQR(signalHost, roomCode, options = {}) {
-function renderMeshQR(signalHost, roomCode, options = {}) {
   let base;
   try {
     base = new URL(signalHost);
@@ -254,8 +253,6 @@ function renderMeshQR(signalHost, roomCode, options = {}) {
   // Remove any trailing slashes so joining "/r/<code>" is always clean
   base.pathname = base.pathname.replace(/\/+$/, "");
   const meshUrl = `${base.origin}${base.pathname}/r/${roomCode}`;
-  return renderQR(meshUrl, options);
-}
   return renderQR(meshUrl, options);
 }
 
