@@ -15,12 +15,8 @@ if (majorVersion < 18) {
   process.exit(1);
 }
 
-// Ensure the process fails on unhandled rejections instead of silently ignoring them
-process.on('unhandledRejection', (err) => {
-  console.error('\x1b[31mfiledrop: fatal error: Unhandled Promise Rejection\x1b[0m');
-  console.error(err);
-  process.exit(1);
-});
+const { registerGlobalErrorHandlers } = require('../src/errors');
+registerGlobalErrorHandlers();
 
 // Load and execute the main orchestrator
 require('../src/index.js');

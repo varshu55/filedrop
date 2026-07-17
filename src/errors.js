@@ -62,27 +62,47 @@ const ERROR_CODES = {
   ERR_INVALID_IP: 'ERR_INVALID_IP'
 };
 
+function exitAfterTerminalRestore(exitCode) {
+  const exit = () => process.exit(exitCode);
+  if (!process.stdout.isTTY) {
+    exit();
+    return;
+  }
+
+  process.stdout.write('\x1b[?25h\x1b[0m\n', exit);
+}
+
+function formatFatalValue(value) {
+  try {
+    return value?.message == null ? String(value) : String(value.message);
+  } catch {
+    return '<unprintable error>';
+  }
+}
+
+function handleUnexpectedError(err) {
+  console.error(`\nfiledrop: unexpected error: ${formatFatalValue(err)}`);
+  if (process.env.FILEDROP_DEBUG) {
+    console.error(err?.stack || formatFatalValue(err));
+  }
+  exitAfterTerminalRestore(99);
+}
+
+function handleUnhandledRejection(reason) {
+  console.error(`\nfiledrop: unhandled async error: ${formatFatalValue(reason)}`);
+  if (process.env.FILEDROP_DEBUG) {
+    console.error(reason?.stack || formatFatalValue(reason));
+  }
+  exitAfterTerminalRestore(99);
+}
+
 /**
  * Registers global process error handlers.
  * To be called early in the lifecycle.
  */
 function registerGlobalErrorHandlers() {
-  process.on('uncaughtException', (err) => {
-    // Clear any in-progress terminal state (restore cursor, etc.)
-    console.error(`\nfiledrop: unexpected error: ${err.message}`);
-    if (process.env.FILEDROP_DEBUG) {
-      console.error(err.stack);
-    }
-    process.exit(99);
-  });
-
-  process.on('unhandledRejection', (reason) => {
-    console.error(`\nfiledrop: unhandled async error: ${reason}`);
-    if (process.env.FILEDROP_DEBUG) {
-      console.error(reason?.stack || reason);
-    }
-    process.exit(99);
-  });
+  process.on('uncaughtException', handleUnexpectedError);
+  process.on('unhandledRejection', handleUnhandledRejection);
 }
 
 module.exports = {
@@ -92,5 +112,6 @@ module.exports = {
   TransferError,
   ConfigError,
   ERROR_CODES,
+  handleUnexpectedError,
   registerGlobalErrorHandlers
 };
