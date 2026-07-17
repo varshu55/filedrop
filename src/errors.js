@@ -72,18 +72,26 @@ function exitAfterTerminalRestore(exitCode) {
   process.stdout.write('\x1b[?25h\x1b[0m\n', exit);
 }
 
+function formatFatalValue(value) {
+  try {
+    return value?.message == null ? String(value) : String(value.message);
+  } catch {
+    return '<unprintable error>';
+  }
+}
+
 function handleUnexpectedError(err) {
-  console.error(`\nfiledrop: unexpected error: ${err.message}`);
+  console.error(`\nfiledrop: unexpected error: ${formatFatalValue(err)}`);
   if (process.env.FILEDROP_DEBUG) {
-    console.error(err.stack);
+    console.error(err?.stack || formatFatalValue(err));
   }
   exitAfterTerminalRestore(99);
 }
 
 function handleUnhandledRejection(reason) {
-  console.error(`\nfiledrop: unhandled async error: ${reason}`);
+  console.error(`\nfiledrop: unhandled async error: ${formatFatalValue(reason)}`);
   if (process.env.FILEDROP_DEBUG) {
-    console.error(reason?.stack || reason);
+    console.error(reason?.stack || formatFatalValue(reason));
   }
   exitAfterTerminalRestore(99);
 }

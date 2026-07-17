@@ -47,7 +47,9 @@ test('restores terminal state before fatal exit', (t) => {
 
   const fatalErrors = [
     ['uncaughtException', new Error('sync failure')],
-    ['unhandledRejection', new Error('async failure')]
+    ['unhandledRejection', new Error('async failure')],
+    ['uncaughtException', null],
+    ['unhandledRejection', Symbol('async failure')]
   ];
 
   process.stdout.isTTY = true;
