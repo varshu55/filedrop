@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const clipboardy = require('clipboardy').default || require('clipboardy');
 const fs = require('fs');
 const { confirmSensitiveFile } = require('./security');
+const { handleUnexpectedError } = require('./errors');
 
 // Assumed imports from other agents
 const network = require("./network");
@@ -353,7 +354,4 @@ async function main() {
   await exitPromise;
 }
 
-main().catch((err) => {
-  console.error(`Unhandled error: ${err.message}`);
-  process.exit(1);
-});
+main().catch(handleUnexpectedError);

@@ -62,10 +62,30 @@ const ERROR_CODES = {
   ERR_INVALID_IP: 'ERR_INVALID_IP'
 };
 
-function restoreTerminalState() {
-  if (process.stdout.isTTY) {
-    process.stdout.write('\x1b[?25h\x1b[0m\n');
+function exitAfterTerminalRestore(exitCode) {
+  const exit = () => process.exit(exitCode);
+  if (!process.stdout.isTTY) {
+    exit();
+    return;
   }
+
+  process.stdout.write('\x1b[?25h\x1b[0m\n', exit);
+}
+
+function handleUnexpectedError(err) {
+  console.error(`\nfiledrop: unexpected error: ${err.message}`);
+  if (process.env.FILEDROP_DEBUG) {
+    console.error(err.stack);
+  }
+  exitAfterTerminalRestore(99);
+}
+
+function handleUnhandledRejection(reason) {
+  console.error(`\nfiledrop: unhandled async error: ${reason}`);
+  if (process.env.FILEDROP_DEBUG) {
+    console.error(reason?.stack || reason);
+  }
+  exitAfterTerminalRestore(99);
 }
 
 /**
@@ -73,23 +93,8 @@ function restoreTerminalState() {
  * To be called early in the lifecycle.
  */
 function registerGlobalErrorHandlers() {
-  process.on('uncaughtException', (err) => {
-    restoreTerminalState();
-    console.error(`\nfiledrop: unexpected error: ${err.message}`);
-    if (process.env.FILEDROP_DEBUG) {
-      console.error(err.stack);
-    }
-    process.exit(99);
-  });
-
-  process.on('unhandledRejection', (reason) => {
-    restoreTerminalState();
-    console.error(`\nfiledrop: unhandled async error: ${reason}`);
-    if (process.env.FILEDROP_DEBUG) {
-      console.error(reason?.stack || reason);
-    }
-    process.exit(99);
-  });
+  process.on('uncaughtException', handleUnexpectedError);
+  process.on('unhandledRejection', handleUnhandledRejection);
 }
 
 module.exports = {
@@ -99,5 +104,6 @@ module.exports = {
   TransferError,
   ConfigError,
   ERROR_CODES,
+  handleUnexpectedError,
   registerGlobalErrorHandlers
 };
