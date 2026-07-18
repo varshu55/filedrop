@@ -514,4 +514,65 @@ test('Server Core', async (t) => {
       } catch (_) {}
     }
   });
+
+
+  await t.test('Content-Disposition filename sanitization', async () => {
+    const maliciousNames = [
+      { name: 'evil\r\nX-Test: injected.txt', expectedSafe: 'evilX-Test: injected.txt' },
+      { name: 'hello"world.txt', expectedSafe: 'hello\\"world.txt' },
+      { name: 'null\0byte.txt', expectedSafe: 'nullbyte.txt' },
+      { name: 'control\x1Fchars.txt', expectedSafe: 'controlchars.txt' },
+      { name: 'normal.txt', expectedSafe: 'normal.txt' }
+    ];
+
+    for (const { name, expectedSafe } of maliciousNames) {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'filedrop-test-'));
+      const dummyPath = path.join(tempDir, 'dummy_test_file.txt');
+      fs.writeFileSync(dummyPath, 'content');
+      
+      const originalBasename = path.basename;
+      path.basename = (p, ext) => p === dummyPath ? name : originalBasename(p, ext);
+      
+      let downloadPathForTest = '';
+      let shutdownForTest = null;
+      
+      try {
+        const { server, shutdown, downloadPath } = await createServer({
+          filePath: dummyPath,
+          port: 0,
+          onTransferComplete: () => {},
+          onTransferError: () => {}
+        });
+        shutdownForTest = shutdown;
+        downloadPathForTest = downloadPath;
+        
+        const port = server.address().port;
+        const cd = await new Promise((resolve, reject) => {
+          const req = http.request(`http://127.0.0.1:${port}${downloadPathForTest}`, { method: 'HEAD', agent: false }, (res) => {
+            res.resume();
+            resolve(res.headers['content-disposition']);
+          });
+          req.on('error', reject);
+          req.end();
+        });
+        
+        // Assert filename="..." has sanitized value
+        assert.ok(cd.includes(`filename="${expectedSafe}"`), `Failed for ${name}. Header was: ${cd}`);
+        // Assert filename*=UTF-8'' has original value URI-encoded
+        const expectedEncoded = encodeURIComponent(name).replace(/['()]/g, escape).replace(/\*/g, '%2A');
+        assert.ok(cd.includes(`filename*=UTF-8''${expectedEncoded}`), `Failed for ${name}. Header was: ${cd}`);
+        
+        // Ensure no actual CR or LF in header
+        assert.ok(!cd.includes('\r') && !cd.includes('\n'), `Header contains CR/LF for ${name}`);
+      } finally {
+        if (shutdownForTest) {
+          await shutdownForTest();
+        }
+        path.basename = originalBasename;
+        try {
+          fs.unlinkSync(dummyPath);
+        } catch (_) { /* ignore */ }
+      }
+    }
+  });
 });
