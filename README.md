@@ -58,6 +58,9 @@ filedrop --clipboard                # share your clipboard contents
 | `--token [token]` | Require a token parameter (?t=<token>) to access links. Generates a random 16-character hex token if empty. |
 | `--max-connections <n>` | Max concurrent TCP connections (default: 10, 0 to disable) |
 | `--no-warn-sensitive` | Bypass warning prompt before serving sensitive files |
+| `--no-mdns` | Disable mDNS broadcasting |
+| `--mesh / --no-mesh` | Enable or disable WebRTC mesh transport (default: auto fallback) |
+| `--signal-url <url>` | Signaling server URL for WebRTC mesh fallback |
 | `--clipboard` | Share clipboard contents instead of a file |
 | `--qr / --no-qr` | Show or hide the QR code (default: show) |
 | `--qr-compact` | Print QR code without surrounding metadata box |
@@ -79,6 +82,10 @@ PIN codes have been fully deprecated and removed. The new Fragment Crypto system
 
 **Can I serve a directory or multiple files?**
 Yes! Starting in v2.0.8, you can pass multiple files or a directory to `filedrop`. It will automatically compress the payload into a `.zip` stream on the fly and pipe it through the AES-256-GCM encryption layer. No temporary zip files are written to your disk.
+
+**What is WebRTC Mesh & Signaling?**
+Starting in v2.0.9, filedrop implements an automatic transport selection policy. It prefers LAN (mDNS) connection when a local peer is detected within a 3-second boot window. If no local peer is found and a `--signal-url` is provided, it falls back to a WebRTC mesh transport.
+*Note:* The WebSocket connection to the signaling server has a small ongoing overhead. While negligible for quick file transfers, it should be kept in mind for long-running, persistent sessions.
 
 ## Contributing
 
