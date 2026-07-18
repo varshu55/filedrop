@@ -30,12 +30,12 @@ const { validateToken, createConnectionLimiter } = require('./security');
 const U8_TO_BINARY_CHUNK_SIZE = 10000;
 
 function escapeHtml(unsafe) {
-    return unsafe
-         .replace(/&/g, "&amp;")
-         .replace(/</g, "&lt;")
-         .replace(/>/g, "&gt;")
-         .replace(/"/g, "&quot;")
-         .replace(/'/g, "&#039;");
+  return unsafe
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
 async function createServer({
@@ -65,11 +65,11 @@ async function createServer({
   const transferId = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2);
   const downloadToken = crypto.randomBytes(16).toString('hex');
   const downloadPath = `/download/${downloadToken}`;
-  
+
   // Generate E2EE Key
   const aesKey = crypto.randomBytes(32);
   const keyHex = aesKey.toString('hex');
-  
+
   let fileStat;
   try {
     if (!isClipboard && !isMultiFile) {
@@ -88,7 +88,7 @@ async function createServer({
   } else if (filePath) {
     contentType = mime.getType(filePath) || 'application/octet-stream';
   }
-  
+
   const encodedFileName = encodeURIComponent(fileName)
     .replace(/['()]/g, escape)
     .replace(/\*/g, '%2A');
@@ -98,7 +98,7 @@ async function createServer({
   const timeoutMs = (options.timeout != null ? options.timeout : DEFAULT_TIMEOUT_SECONDS) * 1000;
   const maxConnections = options.maxConnections !== undefined ? options.maxConnections : DEFAULT_MAX_CONNECTIONS;
   const connectionLimiter = maxConnections > 0 ? createConnectionLimiter(maxConnections) : null;
-  
+
   const completedIPs = new Set();
   // Keep active transfer IPs locked for a short settle period so a retry that arrives
   // immediately after a disconnect or finish still hits the 429 guard instead of racing
@@ -116,16 +116,16 @@ async function createServer({
   function checkRateLimit(ip) {
     const now = Date.now();
     let timestamps = ipRequestCounts.get(ip) || [];
-    
+
     // Filter out timestamps outside the rolling window
     timestamps = timestamps.filter(timestamp => (now - timestamp) <= rateLimitWindow);
-    
+
     if (timestamps.length >= rateLimitMax) {
       // Save the cleaned array back before blocking
       ipRequestCounts.set(ip, timestamps);
       return false; // blocked
     }
-    
+
     timestamps.push(now);
     ipRequestCounts.set(ip, timestamps);
     return true; // allowed
@@ -396,7 +396,7 @@ async function createServer({
       res.end('Forbidden');
       return;
     }
-    
+
     if (pathname === '/forge.min.js') {
       const forgePath = path.join(__dirname, '../node_modules/node-forge/dist/forge.min.js');
       const forgeStream = fs.createReadStream(forgePath);
@@ -434,8 +434,10 @@ async function createServer({
         res.end('Too Many Requests');
         return;
       }
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      res.end(htmlPayload);
+      res.writeHead(200, {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Referrer-Policy': 'no-referrer'
+      }); res.end(htmlPayload);
       return;
     }
 
@@ -600,7 +602,7 @@ async function createServer({
       transferConcluded = true;
       clearTimeout(transferTimeout);
       req.socket.destroy();
-      
+
       if (err.code === 'EMFILE') {
         onTransferError(new Error('ERR_TOO_MANY_OPEN_FILES'));
       } else {
@@ -610,10 +612,10 @@ async function createServer({
 
     const iv = crypto.randomBytes(12);
     const cipher = crypto.createCipheriv('aes-256-gcm', aesKey, iv);
-    
+
     // Write IV first
     res.write(iv);
-    
+
     sourceStream.on('data', (chunk) => {
       const encrypted = cipher.update(chunk);
       if (encrypted.length > 0) {
@@ -663,7 +665,7 @@ async function createServer({
         resolve();
       };
       const forceTimeout = setTimeout(finish, shutdownTimeoutMs);
-      
+
       if (typeof options.onShutdown === 'function') {
         try { options.onShutdown(); } catch (err) { }
       }
