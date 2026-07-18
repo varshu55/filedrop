@@ -39,7 +39,10 @@ function escapeHtml(unsafe) {
 }
 
 function sanitizeDownloadFileName(name) {
-  return name.replace(/[\x00-\x1F\x7F]/g, '').replace(/"/g, '\\"');
+  return String(name)
+    .replace(/[\x00-\x1F\x7F]/g, '')
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"');
 }
 
 async function createServer({
@@ -670,7 +673,11 @@ async function createServer({
       const forceTimeout = setTimeout(finish, shutdownTimeoutMs);
       
       if (typeof options.onShutdown === 'function') {
-        try { options.onShutdown(); } catch (err) { /* ignore */ }
+        try { 
+          options.onShutdown(); 
+        } catch {
+          // Ignore cleanup errors.
+        }
       }
 
       server.close(() => {

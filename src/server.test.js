@@ -511,7 +511,9 @@ test('Server Core', async (t) => {
       await shutdown();
       try {
         fs.unlinkSync(filePath);
-      } catch (_) {}
+      } catch {
+        // Ignore cleanup errors.
+      }
     }
   });
 
@@ -522,7 +524,9 @@ test('Server Core', async (t) => {
       { name: 'hello"world.txt', expectedSafe: 'hello\\"world.txt' },
       { name: 'null\0byte.txt', expectedSafe: 'nullbyte.txt' },
       { name: 'control\x1Fchars.txt', expectedSafe: 'controlchars.txt' },
-      { name: 'normal.txt', expectedSafe: 'normal.txt' }
+      { name: 'normal.txt', expectedSafe: 'normal.txt' },
+      { name: 'hello\\world.txt', expectedSafe: 'hello\\\\world.txt' },
+      { name: 'abc\\', expectedSafe: 'abc\\\\' }
     ];
 
     for (const { name, expectedSafe } of maliciousNames) {
@@ -571,7 +575,9 @@ test('Server Core', async (t) => {
         path.basename = originalBasename;
         try {
           fs.unlinkSync(dummyPath);
-        } catch (_) { /* ignore */ }
+        } catch {
+          // Ignore cleanup errors.
+        }
       }
     }
   });
