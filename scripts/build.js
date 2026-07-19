@@ -19,7 +19,7 @@ console.log('Building standalone binaries with pkg...');
 console.log('Decision: Using "pkg" from Vercel.');
 console.log('Justification: pkg is the standard for packaging Node.js apps into standalone executables.');
 console.log('It automatically resolves dependencies and bundles them, including native bindings.');
-console.log('NOTE: multicast-dns and native fs operations generally work fine in pkg as long as we don\'t rely on __dirname for reading non-JS assets that weren\'t explicitly included in pkg assets.');
+console.log('NOTE: package.json explicitly includes the node-forge browser bundle in pkg.assets; other non-JS assets must be declared there too.');
 
 if (!fs.existsSync(DIST_DIR)) {
   fs.mkdirSync(DIST_DIR);

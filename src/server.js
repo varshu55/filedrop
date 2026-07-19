@@ -13,6 +13,7 @@ async function getZipArchive() {
 const mime = require('mime');
 const pkg = require('../package.json');
 const VERSION = pkg.version;
+const FORGE_ASSET_PATH = require.resolve('node-forge/dist/forge.min.js');
 
 const {
   DEFAULT_TIMEOUT_SECONDS,
@@ -399,8 +400,7 @@ async function createServer({
     }
     
     if (pathname === '/forge.min.js') {
-      const forgePath = path.join(__dirname, '../node_modules/node-forge/dist/forge.min.js');
-      const forgeStream = fs.createReadStream(forgePath);
+      const forgeStream = fs.createReadStream(FORGE_ASSET_PATH);
       forgeStream.on('error', () => {
         if (!res.headersSent) res.writeHead(404, { 'Content-Type': 'text/plain' });
         res.end('Not found');

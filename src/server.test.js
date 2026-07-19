@@ -411,6 +411,49 @@ test('Server Core', async (t) => {
     await shutdown();
   });
 
+  await t.test('GET /forge.min.js resolves node-forge from a hoisted install', async () => {
+    const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'filedrop-hoisted-'));
+    const appRoot = path.join(fixtureRoot, 'app');
+    const sourceRoot = path.join(appRoot, 'src');
+    const projectRoot = path.resolve(__dirname, '..');
+
+    try {
+      fs.mkdirSync(sourceRoot, { recursive: true });
+      fs.copyFileSync(path.join(projectRoot, 'package.json'), path.join(appRoot, 'package.json'));
+      for (const file of ['server.js', 'constants.js', 'security.js']) {
+        fs.copyFileSync(path.join(__dirname, file), path.join(sourceRoot, file));
+      }
+      fs.symlinkSync(
+        path.join(projectRoot, 'node_modules'),
+        path.join(fixtureRoot, 'node_modules'),
+        process.platform === 'win32' ? 'junction' : 'dir'
+      );
+
+      const hoistedServer = require(path.join(sourceRoot, 'server.js'));
+      const filePath = createTempFile(1024, '.txt');
+      const { server, shutdown } = await hoistedServer.createServer({
+        filePath,
+        port: 0,
+        onTransferComplete: () => {},
+        onTransferError: () => {}
+      });
+
+      try {
+        const port = server.address().port;
+        const response = await httpClient(`http://127.0.0.1:${port}/forge.min.js`);
+        const expected = fs.readFileSync(require.resolve('node-forge/dist/forge.min.js'));
+
+        assert.strictEqual(response.statusCode, 200);
+        assert.strictEqual(response.headers['content-type'], 'application/javascript');
+        assert.deepStrictEqual(response.body, expected);
+      } finally {
+        await shutdown();
+      }
+    } finally {
+      fs.rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
   await t.test('Connection limiting: rejects connections beyond maxConnections', async () => {
     const filePath = createTempFile(1024, '.txt');
     const { server, shutdown } = await createServer({
