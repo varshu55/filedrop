@@ -13,6 +13,9 @@
 const os = require('os');
 const path = require('path');
 const mDNS = require('multicast-dns');
+const EventEmitter = require('events');
+
+let peerFound = false;
 
 function createSession() {
   return {
@@ -118,6 +121,7 @@ function resetSession() {
   session.activeServiceName = '';
   session.activeHostName = '';
   session.activeOnQuery = null;
+  peerFound = false;
 }
 
 function abortActiveAnnounce() {
@@ -138,8 +142,20 @@ async function probe(instance, name, maxSuffix = 10) {
 
       const onResponse = (packet) => {
         const answers = [].concat(packet.answers || [], packet.additionals || [], packet.authorities || []);
+        
         if (answers.some(ans => ans.name === candidateService)) {
           hasConflict = true;
+        }
+
+        const hasAnyPeer = answers.some(ans => {
+          const serviceName = ans.type === 'PTR' ? ans.data : ans.name;
+          return typeof serviceName === 'string' &&
+            serviceName.endsWith('-filedrop._http._tcp.local');
+        });
+
+        if (hasAnyPeer) {
+          peerFound = true;
+          module.exports.emit('peer-found', packet);
         }
       };
 
@@ -147,7 +163,10 @@ async function probe(instance, name, maxSuffix = 10) {
 
       try {
         instance.query({
-          questions: [{ name: candidateService, type: 'ANY' }]
+          questions: [
+            { name: candidateService, type: 'ANY' },
+            { name: '_http._tcp.local', type: 'PTR' }
+          ]
         });
       } catch (e) {
         instance.removeListener('response', onResponse);
@@ -181,6 +200,7 @@ async function probe(instance, name, maxSuffix = 10) {
  * @returns {Promise<{ name: string, mdnsAvailable: boolean }>}
  */
 async function announce(config) {
+  peerFound = false;
   if (session.mdnsInstance) {
     abortActiveAnnounce();
     await deregister();
@@ -331,6 +351,10 @@ async function deregister() {
 }
 
 function bind(lifecycle) {
+  module.exports.on('peer-found', (packet) => {
+    lifecycle.emit('mdns:peer-found', packet);
+  });
+
   lifecycle.on('mdns:announce', async (config) => {
     try {
       const result = await module.exports.announce(config);
@@ -358,5 +382,9 @@ module.exports = {
   announce,
   deregister,
   teardown: deregister,
-  bind
+  bind,
+  hasPeerFound: () => peerFound,
+  resetPeerFound: () => { peerFound = false; }
 };
+Object.setPrototypeOf(module.exports, EventEmitter.prototype);
+EventEmitter.call(module.exports);

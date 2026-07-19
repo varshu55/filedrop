@@ -13,6 +13,7 @@ async function getZipArchive() {
 const mime = require('mime');
 const pkg = require('../package.json');
 const VERSION = pkg.version;
+const FORGE_ASSET_PATH = require.resolve('node-forge/dist/forge.min.js');
 
 const {
   DEFAULT_TIMEOUT_SECONDS,
@@ -52,6 +53,7 @@ async function createServer({
   clipboardData = null,
   isClipboard = false,
   port,
+  bindIp,
   isDirectory = false,
   options = {},
   downloadLimit = 1,
@@ -406,8 +408,7 @@ async function createServer({
     }
     
     if (pathname === '/forge.min.js') {
-      const forgePath = path.join(__dirname, '../node_modules/node-forge/dist/forge.min.js');
-      const forgeStream = fs.createReadStream(forgePath);
+      const forgeStream = fs.createReadStream(FORGE_ASSET_PATH);
       forgeStream.on('error', () => {
         if (!res.headersSent) res.writeHead(404, { 'Content-Type': 'text/plain' });
         res.end('Not found');
@@ -527,7 +528,7 @@ async function createServer({
     }, timeoutMs) : null;
 
     const markTransferComplete = () => {
-      if (transferState === 'complete' || transferState === 'timed-out') return;
+      if (transferState === 'complete' || transferState === 'timed-out' || transferState === 'error') return;
       transferState = 'complete';
       transferConcluded = true;
       if (transferTimeout) clearTimeout(transferTimeout);
@@ -538,7 +539,7 @@ async function createServer({
     };
 
     const markTransferDisconnected = () => {
-      if (transferState === 'complete' || transferState === 'timed-out') return;
+      if (transferState === 'complete' || transferState === 'timed-out' || transferState === 'error') return;
       if (transferState === 'disconnect') return;
       transferState = 'disconnect';
       transferConcluded = true;
@@ -599,6 +600,19 @@ async function createServer({
         sourceStream = fs.createReadStream(filePath);
       }
     } catch (err) {
+      activeIPs.delete(clientIp);
+      transferConcluded = true;
+      transferState = 'error';
+      if (transferTimeout) clearTimeout(transferTimeout);
+
+      if (res.headersSent) {
+        req.socket.destroy();
+      } else {
+        res.removeHeader('Content-Length');
+        res.writeHead(500, { 'Content-Type': 'text/plain' });
+        res.end('Transfer failed');
+      }
+
       onTransferError(err);
       return;
     }
@@ -606,7 +620,9 @@ async function createServer({
     sourceStream.on('error', (err) => {
       if (transferConcluded) return;
       transferConcluded = true;
-      clearTimeout(transferTimeout);
+      transferState = 'error';
+      activeIPs.delete(clientIp);
+      if (transferTimeout) clearTimeout(transferTimeout);
       req.socket.destroy();
       
       if (err.code === 'EMFILE') {
@@ -693,7 +709,7 @@ async function createServer({
 
   return new Promise((resolve, reject) => {
     server.once('error', reject);
-    server.listen(port, '0.0.0.0', () => {
+    server.listen(port, bindIp || '0.0.0.0', () => {
       server.removeListener('error', reject);
       // Expose keyHex here
       resolve({ server, shutdown, keyHex, downloadPath });

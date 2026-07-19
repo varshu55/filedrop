@@ -175,5 +175,72 @@ test('CLI Parser', async (t) => {
     assert.strictEqual(config2.maxConnections, 8);
 
   });
+
+  await t.test('Parses --mesh, --no-mesh, and --signal-url options', () => {
+    const filePath = createTempFile(1024, '.txt');
+    
+    // 1. With --mesh and --signal-url
+    const configMesh = parseArgs([
+      'node',
+      'filedrop',
+      filePath,
+      '--mesh',
+      '--signal-url',
+      'ws://localhost'
+    ]);
+    assert.strictEqual(configMesh.mesh, true);
+    assert.strictEqual(configMesh.signalUrl, 'ws://localhost');
+
+    // 2. With --no-mesh
+    const configNoMesh = parseArgs([
+      'node',
+      'filedrop',
+      filePath,
+      '--no-mesh'
+    ]);
+    assert.strictEqual(configNoMesh.mesh, false);
+
+    // 3. Without specifying mesh
+    const configNoFlag = parseArgs([
+      'node',
+      'filedrop',
+      filePath
+    ]);
+    assert.strictEqual(configNoFlag.mesh, undefined);
+
+    // 4. With --signal-url
+    const configSignal = parseArgs([
+      'node',
+      'filedrop',
+      filePath,
+      '--signal-url',
+      'ws://my-signaling-server.local'
+    ]);
+    assert.strictEqual(configSignal.signalUrl, 'ws://my-signaling-server.local');
+  });
+
+  await t.test('Fails when --mesh is specified without --signal-url', () => {
+    const filePath = createTempFile(1024, '.txt');
+    const originalExit = process.exit;
+    const originalError = console.error;
+    let exitCode = null;
+    let errors = [];
+
+    process.exit = (code) => {
+      exitCode = code;
+    };
+    console.error = (msg) => {
+      errors.push(msg);
+    };
+
+    try {
+      parseArgs(['node', 'filedrop', filePath, '--mesh']);
+      assert.strictEqual(exitCode, 1);
+      assert.ok(errors.some(err => err.includes('--signal-url is required when using --mesh')));
+    } finally {
+      process.exit = originalExit;
+      console.error = originalError;
+    }
+  });
 });
 
