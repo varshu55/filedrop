@@ -52,6 +52,8 @@ Options:
   --qr / --no-qr         Show or hide the QR code (default: show)
   --qr-compact           Print QR code without surrounding metadata box
   --no-mdns              Disable mDNS broadcasting
+  --mesh / --no-mesh     Enable or disable WebRTC mesh transport (default: auto)
+  --signal-url <url>     Signaling server URL for WebRTC mesh fallback
   --clipboard            Share system clipboard contents
   --verbose, -v          Verbose output (log all decisions)
   --no-color             Force no-color output (also respects NO_COLOR env var)
@@ -66,7 +68,7 @@ filedrop v${VERSION} — ${REPOSITORY_URL}`);
 function parseArgs(argv) {
   const args = minimist(argv.slice(2), {
     boolean: ['qr-compact', 'verbose', 'version', 'help', 'qr', 'mdns', 'clipboard', 'warn-sensitive'],
-    string: ['port', 'bind', 'timeout', 'rate-limit-window', 'rate-limit-max', 'name', 'color', 'shutdown-grace-ms', 'token', 'max-connections'],
+    string: ['port', 'bind', 'timeout', 'rate-limit-window', 'rate-limit-max', 'name', 'color', 'shutdown-grace-ms', 'token', 'max-connections', 'signal-url', 'signal-host'],
     alias: {
       p: "port",
       b: "bind",
@@ -230,6 +232,12 @@ function parseArgs(argv) {
     process.exit(1);
   }
 
+  if (args.mesh && !args['signal-url']) {
+    console.error('filedrop: error: --signal-url is required when using --mesh');
+    console.error("Run 'filedrop --help' for usage.");
+    process.exit(1);
+  }
+
   let token = null;
   if (args.token !== undefined) {
     if (args.token === '') {
@@ -261,7 +269,8 @@ function parseArgs(argv) {
     mdns: args.mdns,
     verbose: args.verbose,
     color: args.color,
-    mesh: args.mesh || false,
+    mesh: args.mesh,
+    signalUrl: args['signal-url'],
     signalHost: args["signal-host"] || null,
   };
 }

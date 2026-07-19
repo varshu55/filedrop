@@ -6,6 +6,11 @@
   "bin": {
     "filedrop": "bin/filedrop.js"
   },
+  "pkg": {
+    "assets": [
+      "node_modules/node-forge/dist/forge.min.js"
+    ]
+  },
   "engines": {
     "node": ">=18.0.0"
   },
