@@ -308,7 +308,7 @@ test('Server Core', async (t) => {
   });
 
   await t.test('Transfer timeout: custom timeout triggers ERR_TRANSFER_TIMEOUT', async () => {
-    const filePath = createTempFile(2 * 1024 * 1024, '.txt');
+    const filePath = createTempFile(50 * 1024 * 1024, '.txt');
     let errorCalled = false;
     let errorPromiseResolve;
     const errorPromise = new Promise(r => errorPromiseResolve = r);
