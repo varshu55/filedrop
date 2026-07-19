@@ -202,6 +202,7 @@ async function main() {
       clipboardData,
       isClipboard: config.isClipboard,
       port: port,
+      bindIp: config.bind ? ip : undefined,
       isDirectory: config.isDirectory,
       downloadLimit: limit,
       options: {

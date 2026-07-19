@@ -514,4 +514,46 @@ test('Server Core', async (t) => {
       } catch (_) {}
     }
   });
+
+  await t.test('--bind option: server listens on specified IP', async () => {
+    const tempDir = os.tmpdir();
+    const filePath = path.join(tempDir, 'filedrop-test-bind.txt');
+    fs.writeFileSync(filePath, 'content');
+
+    const { server, shutdown } = await createServer({
+      filePath,
+      port: 0,
+      bindIp: '127.0.0.1',
+      onTransferComplete: () => {},
+      onTransferError: () => {}
+    });
+
+    try {
+      assert.strictEqual(server.address().address, '127.0.0.1');
+    } finally {
+      await shutdown();
+      try { fs.unlinkSync(filePath); } catch (_) {}
+    }
+  });
+
+  await t.test('--bind option: omitted defaults to 0.0.0.0 (or ::)', async () => {
+    const tempDir = os.tmpdir();
+    const filePath = path.join(tempDir, 'filedrop-test-nobind.txt');
+    fs.writeFileSync(filePath, 'content');
+
+    const { server, shutdown } = await createServer({
+      filePath,
+      port: 0,
+      onTransferComplete: () => {},
+      onTransferError: () => {}
+    });
+
+    try {
+      const address = server.address().address;
+      assert.ok(address === '0.0.0.0' || address === '::');
+    } finally {
+      await shutdown();
+      try { fs.unlinkSync(filePath); } catch (_) {}
+    }
+  });
 });

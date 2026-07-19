@@ -45,6 +45,7 @@ async function createServer({
   clipboardData = null,
   isClipboard = false,
   port,
+  bindIp,
   isDirectory = false,
   options = {},
   downloadLimit = 1,
@@ -681,7 +682,7 @@ async function createServer({
 
   return new Promise((resolve, reject) => {
     server.once('error', reject);
-    server.listen(port, '0.0.0.0', () => {
+    server.listen(port, bindIp || '0.0.0.0', () => {
       server.removeListener('error', reject);
       // Expose keyHex here
       resolve({ server, shutdown, keyHex, downloadPath });
