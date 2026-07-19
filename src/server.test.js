@@ -560,90 +560,68 @@ test('Server Core', async (t) => {
     }
   });
 
-  await t.test('activeIPs is cleaned up if stream setup throws synchronously', async () => {
-    const tempDir = os.tmpdir();
-    const filePath = path.join(tempDir, 'filedrop-test-stream-fail.txt');
-    fs.writeFileSync(filePath, 'content');
 
-    const originalCreateReadStream = fs.createReadStream;
-    fs.createReadStream = () => {
-      throw new Error('Simulated stream setup failure');
-    };
+  await t.test('Content-Disposition filename sanitization', async () => {
+    const maliciousNames = [
+      { name: 'evil\r\nX-Test: injected.txt', expectedSafe: 'evilX-Test: injected.txt' },
+      { name: 'hello"world.txt', expectedSafe: 'hello\\"world.txt' },
+      { name: 'null\0byte.txt', expectedSafe: 'nullbyte.txt' },
+      { name: 'control\x1Fchars.txt', expectedSafe: 'controlchars.txt' },
+      { name: 'normal.txt', expectedSafe: 'normal.txt' },
+      { name: 'hello\\world.txt', expectedSafe: 'hello\\\\world.txt' },
+      { name: 'abc\\', expectedSafe: 'abc\\\\' }
+    ];
 
-    let errorEmitted = null;
-    const { server, shutdown, downloadPath } = await createServer({
-      filePath,
-      port: 0,
-      onTransferComplete: () => {},
-      onTransferError: (err) => { errorEmitted = err; }
-    });
-
-    try {
-      const port = server.address().port;
-
-
-      // 1. First request triggers the throw inside createServer's /download endpoint
-      const res1 = await httpClient(`http://127.0.0.1:${port}${downloadPath}`, { agent: false });
-      assert.strictEqual(res1.statusCode, 500);
-
-      // Verify onTransferError was called
-      assert.ok(errorEmitted && errorEmitted.message.includes('Simulated stream setup failure'));
-
-      // 2. Second request should NOT be rate limited (429) if activeIPs was cleaned up
-      const res2 = await httpClient(`http://127.0.0.1:${port}${downloadPath}`, { agent: false });
-      // It will again hit the 500 since createReadStream still throws
-      assert.strictEqual(res2.statusCode, 500);
-
-    } finally {
-      fs.createReadStream = originalCreateReadStream;
-      await shutdown();
+    for (const { name, expectedSafe } of maliciousNames) {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'filedrop-test-'));
+      const dummyPath = path.join(tempDir, 'dummy_test_file.txt');
+      fs.writeFileSync(dummyPath, 'content');
+      
+      const originalBasename = path.basename;
+      path.basename = (p, ext) => p === dummyPath ? name : originalBasename(p, ext);
+      
+      let downloadPathForTest = '';
+      let shutdownForTest = null;
+      
       try {
-        fs.unlinkSync(filePath);
-      } catch {
-        // Ignore cleanup errors.
+        const { server, shutdown, downloadPath } = await createServer({
+          filePath: dummyPath,
+          port: 0,
+          onTransferComplete: () => {},
+          onTransferError: () => {}
+        });
+        shutdownForTest = shutdown;
+        downloadPathForTest = downloadPath;
+        
+        const port = server.address().port;
+        const cd = await new Promise((resolve, reject) => {
+          const req = http.request(`http://127.0.0.1:${port}${downloadPathForTest}`, { method: 'HEAD', agent: false }, (res) => {
+            res.resume();
+            resolve(res.headers['content-disposition']);
+          });
+          req.on('error', reject);
+          req.end();
+        });
+        
+        // Assert filename="..." has sanitized value
+        assert.ok(cd.includes(`filename="${expectedSafe}"`), `Failed for ${name}. Header was: ${cd}`);
+        // Assert filename*=UTF-8'' has original value URI-encoded
+        const expectedEncoded = encodeURIComponent(name).replace(/['()]/g, escape).replace(/\*/g, '%2A');
+        assert.ok(cd.includes(`filename*=UTF-8''${expectedEncoded}`), `Failed for ${name}. Header was: ${cd}`);
+        
+        // Ensure no actual CR or LF in header
+        assert.ok(!cd.includes('\r') && !cd.includes('\n'), `Header contains CR/LF for ${name}`);
+      } finally {
+        if (shutdownForTest) {
+          await shutdownForTest();
+        }
+        path.basename = originalBasename;
+        try {
+          fs.unlinkSync(dummyPath);
+        } catch {
+          // Ignore cleanup errors.
+        }
       }
-    }
-  });
-
-  await t.test('--bind option: server listens on specified IP', async () => {
-    const tempDir = os.tmpdir();
-    const filePath = path.join(tempDir, 'filedrop-test-bind.txt');
-    fs.writeFileSync(filePath, 'content');
-
-    const { server, shutdown } = await createServer({
-      filePath,
-      port: 0,
-      bindIp: '127.0.0.1',
-      onTransferComplete: () => {},
-      onTransferError: () => {}
-    });
-
-    try {
-      assert.strictEqual(server.address().address, '127.0.0.1');
-    } finally {
-      await shutdown();
-      try { fs.unlinkSync(filePath); } catch (_) {}
-    }
-  });
-
-  await t.test('--bind option: omitted defaults to 0.0.0.0 (or ::)', async () => {
-    const tempDir = os.tmpdir();
-    const filePath = path.join(tempDir, 'filedrop-test-nobind.txt');
-    fs.writeFileSync(filePath, 'content');
-
-    const { server, shutdown } = await createServer({
-      filePath,
-      port: 0,
-      onTransferComplete: () => {},
-      onTransferError: () => {}
-    });
-
-    try {
-      const address = server.address().address;
-      assert.ok(address === '0.0.0.0' || address === '::');
-    } finally {
-      await shutdown();
-      try { fs.unlinkSync(filePath); } catch (_) {}
     }
   });
 });

@@ -39,6 +39,13 @@ function escapeHtml(unsafe) {
          .replace(/'/g, "&#039;");
 }
 
+function sanitizeDownloadFileName(name) {
+  return String(name)
+    .replace(/[\x00-\x1F\x7F]/g, '')
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"');
+}
+
 async function createServer({
   filePath,
   filePaths = [],
@@ -91,10 +98,11 @@ async function createServer({
     contentType = mime.getType(filePath) || 'application/octet-stream';
   }
   
+  const safeFileName = sanitizeDownloadFileName(fileName);
   const encodedFileName = encodeURIComponent(fileName)
     .replace(/['()]/g, escape)
     .replace(/\*/g, '%2A');
-  const contentDisposition = `attachment; filename="${fileName.replace(/"/g, '\\"')}"; filename*=UTF-8''${encodedFileName}`;
+  const contentDisposition = `attachment; filename="${safeFileName}"; filename*=UTF-8''${encodedFileName}`;
 
   const version = options.version || VERSION;
   const timeoutMs = (options.timeout != null ? options.timeout : DEFAULT_TIMEOUT_SECONDS) * 1000;
