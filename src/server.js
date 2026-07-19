@@ -520,7 +520,7 @@ async function createServer({
     }, timeoutMs) : null;
 
     const markTransferComplete = () => {
-      if (transferState === 'complete' || transferState === 'timed-out') return;
+      if (transferState === 'complete' || transferState === 'timed-out' || transferState === 'error') return;
       transferState = 'complete';
       transferConcluded = true;
       if (transferTimeout) clearTimeout(transferTimeout);
@@ -531,7 +531,7 @@ async function createServer({
     };
 
     const markTransferDisconnected = () => {
-      if (transferState === 'complete' || transferState === 'timed-out') return;
+      if (transferState === 'complete' || transferState === 'timed-out' || transferState === 'error') return;
       if (transferState === 'disconnect') return;
       transferState = 'disconnect';
       transferConcluded = true;
@@ -592,6 +592,19 @@ async function createServer({
         sourceStream = fs.createReadStream(filePath);
       }
     } catch (err) {
+      activeIPs.delete(clientIp);
+      transferConcluded = true;
+      transferState = 'error';
+      if (transferTimeout) clearTimeout(transferTimeout);
+
+      if (res.headersSent) {
+        req.socket.destroy();
+      } else {
+        res.removeHeader('Content-Length');
+        res.writeHead(500, { 'Content-Type': 'text/plain' });
+        res.end('Transfer failed');
+      }
+
       onTransferError(err);
       return;
     }
@@ -599,7 +612,9 @@ async function createServer({
     sourceStream.on('error', (err) => {
       if (transferConcluded) return;
       transferConcluded = true;
-      clearTimeout(transferTimeout);
+      transferState = 'error';
+      activeIPs.delete(clientIp);
+      if (transferTimeout) clearTimeout(transferTimeout);
       req.socket.destroy();
       
       if (err.code === 'EMFILE') {
@@ -666,7 +681,11 @@ async function createServer({
       const forceTimeout = setTimeout(finish, shutdownTimeoutMs);
       
       if (typeof options.onShutdown === 'function') {
-        try { options.onShutdown(); } catch (err) { }
+        try { 
+          options.onShutdown(); 
+        } catch {
+          // Ignore cleanup errors.
+        }
       }
 
       server.close(() => {

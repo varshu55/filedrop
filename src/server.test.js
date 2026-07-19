@@ -548,13 +548,60 @@ test('Server Core', async (t) => {
 
     try {
       const port = server.address().port;
-      const res = await httpClient(`http://127.0.0.1:${port}/file%20name%20with%20space.txt`);
+      const res = await httpClient(`http://127.0.0.1:${port}/file%20name%20with%20space.txt`, { agent: false });
       assert.strictEqual(res.statusCode, 200);
     } finally {
       await shutdown();
       try {
         fs.unlinkSync(filePath);
-      } catch (_) {}
+      } catch {
+        // Ignore cleanup errors.
+      }
+    }
+  });
+
+  await t.test('activeIPs is cleaned up if stream setup throws synchronously', async () => {
+    const tempDir = os.tmpdir();
+    const filePath = path.join(tempDir, 'filedrop-test-stream-fail.txt');
+    fs.writeFileSync(filePath, 'content');
+
+    const originalCreateReadStream = fs.createReadStream;
+    fs.createReadStream = () => {
+      throw new Error('Simulated stream setup failure');
+    };
+
+    let errorEmitted = null;
+    const { server, shutdown, downloadPath } = await createServer({
+      filePath,
+      port: 0,
+      onTransferComplete: () => {},
+      onTransferError: (err) => { errorEmitted = err; }
+    });
+
+    try {
+      const port = server.address().port;
+
+
+      // 1. First request triggers the throw inside createServer's /download endpoint
+      const res1 = await httpClient(`http://127.0.0.1:${port}${downloadPath}`, { agent: false });
+      assert.strictEqual(res1.statusCode, 500);
+
+      // Verify onTransferError was called
+      assert.ok(errorEmitted && errorEmitted.message.includes('Simulated stream setup failure'));
+
+      // 2. Second request should NOT be rate limited (429) if activeIPs was cleaned up
+      const res2 = await httpClient(`http://127.0.0.1:${port}${downloadPath}`, { agent: false });
+      // It will again hit the 500 since createReadStream still throws
+      assert.strictEqual(res2.statusCode, 500);
+
+    } finally {
+      fs.createReadStream = originalCreateReadStream;
+      await shutdown();
+      try {
+        fs.unlinkSync(filePath);
+      } catch {
+        // Ignore cleanup errors.
+      }
     }
   });
 
